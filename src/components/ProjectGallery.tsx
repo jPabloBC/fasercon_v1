@@ -2,7 +2,7 @@ const projects = [
   {
     id: 1,
     title: 'Centro Logístico Industrial',
-    location: 'Bogotá, Colombia',
+    location: 'Iquique, Chile',
     area: '5,200 m²',
     type: 'Industrial',
     description: 'Cubierta industrial con láminas termoacústicas y estructura de acero galvanizado.',
@@ -13,7 +13,7 @@ const projects = [
   {
     id: 2,
     title: 'Conjunto Residencial Las Palmas',
-    location: 'Medellín, Colombia',
+    location: 'Antofagasta, Chile',
     area: '1,800 m²',
     type: 'Residencial',
     description: 'Techos metálicos para 45 viviendas con diseño arquitectónico personalizado.',
@@ -24,7 +24,7 @@ const projects = [
   {
     id: 3,
     title: 'Planta de Producción Alimentaria',
-    location: 'Cali, Colombia',
+    location: 'Calama, Chile',
     area: '3,400 m²',
     type: 'Industrial',
     description: 'Cubierta especializada para industria alimentaria con normativas sanitarias.',
@@ -35,7 +35,7 @@ const projects = [
   {
     id: 4,
     title: 'Centro Comercial Plaza Norte',
-    location: 'Barranquilla, Colombia',
+    location: 'Santiago, Chile',
     area: '2,100 m²',
     type: 'Comercial',
     description: 'Revestimiento y cubierta para área de plaza de comidas.',

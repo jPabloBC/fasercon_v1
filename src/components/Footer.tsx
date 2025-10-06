@@ -48,15 +48,15 @@ export default function Footer() {
             <div className="space-y-3">
               <div className="flex items-center text-gray-300">
                 <PhoneIcon className="h-5 w-5 mr-3" />
-                <span className="text-sm">+57 (1) 234-5678</span>
+                <span className="text-sm">+56 9 2345678</span>
               </div>
               <div className="flex items-center text-gray-300">
                 <EnvelopeIcon className="h-5 w-5 mr-3" />
-                <span className="text-sm">info@fasercom.com</span>
+                <span className="text-sm">info@fasercom.cl</span>
               </div>
               <div className="flex items-center text-gray-300">
                 <MapPinIcon className="h-5 w-5 mr-3" />
-                <span className="text-sm">Bogotá, Colombia</span>
+                <span className="text-sm">Antofagasta, Chile</span>
               </div>
             </div>
           </div>

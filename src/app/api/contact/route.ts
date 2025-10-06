@@ -5,7 +5,14 @@ import { supabase } from '@/lib/supabase'
 const contactSchema = z.object({
   name: z.string().min(2, 'El nombre debe tener al menos 2 caracteres'),
   email: z.string().email('Email inválido'),
-  phone: z.string().min(10, 'El teléfono debe tener al menos 10 dígitos'),
+  phone: z.string().min(1, 'El teléfono es requerido').refine(
+    (value) => {
+      // Validar que sea un número de teléfono válido (formato internacional)
+      const phoneRegex = /^\+[1-9]\d{1,14}$/
+      return phoneRegex.test(value || '')
+    },
+    'Por favor ingresa un número de teléfono válido'
+  ),
   message: z.string().min(10, 'El mensaje debe tener al menos 10 caracteres'),
 })
 
@@ -18,7 +25,7 @@ export async function POST(request: NextRequest) {
     
     // Guardar en la base de datos
     const { data: contactForm, error } = await supabase
-      .from('contact_forms')
+      .from('fasercon_contact_forms')
       .insert([
         {
           name: validatedData.name,
@@ -26,6 +33,7 @@ export async function POST(request: NextRequest) {
           phone: validatedData.phone,
           message: validatedData.message,
           status: 'PENDING',
+          created_at: new Date().toISOString(),
         },
       ])
       .select()

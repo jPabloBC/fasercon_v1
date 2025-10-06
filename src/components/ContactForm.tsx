@@ -1,14 +1,24 @@
 'use client'
 
 import { useState } from 'react'
-import { useForm } from 'react-hook-form'
+import { useForm, Controller } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
+import PhoneInput from 'react-phone-number-input'
+import 'react-phone-number-input/style.css'
+import '../styles/phone-input.css'
 
 const contactSchema = z.object({
   name: z.string().min(2, 'El nombre debe tener al menos 2 caracteres'),
   email: z.string().email('Email inválido'),
-  phone: z.string().min(10, 'El teléfono debe tener al menos 10 dígitos'),
+  phone: z.string().min(1, 'El teléfono es requerido').refine(
+    (value) => {
+      // Validar que sea un número de teléfono válido (formato internacional)
+      const phoneRegex = /^\+[1-9]\d{1,14}$/
+      return phoneRegex.test(value || '')
+    },
+    'Por favor ingresa un número de teléfono válido'
+  ),
   message: z.string().min(10, 'El mensaje debe tener al menos 10 caracteres'),
 })
 
@@ -22,6 +32,7 @@ export default function ContactForm() {
     register,
     handleSubmit,
     reset,
+    control,
     formState: { errors },
   } = useForm<ContactFormData>({
     resolver: zodResolver(contactSchema),
@@ -56,7 +67,7 @@ export default function ContactForm() {
   const whatsappMessage = encodeURIComponent(
     'Hola, me interesa obtener información sobre sus servicios de cubiertas y techos metálicos.'
   )
-  const whatsappNumber = process.env.NEXT_PUBLIC_WHATSAPP_NUMBER || '1234567890'
+  const whatsappNumber = process.env.NEXT_PUBLIC_WHATSAPP_NUMBER || '573001234567'
   const whatsappUrl = `https://wa.me/${whatsappNumber}?text=${whatsappMessage}`
 
   return (
@@ -110,12 +121,20 @@ export default function ContactForm() {
               Teléfono
             </label>
             <div className="mt-2.5">
-              <input
-                {...register('phone')}
-                type="tel"
-                id="phone"
-                autoComplete="tel"
-                className="block w-full rounded-md border-0 px-3.5 py-2 text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 placeholder:text-gray-400 focus:ring-2 focus:ring-inset focus:ring-blue-600 sm:text-sm sm:leading-6"
+              <Controller
+                name="phone"
+                control={control}
+                render={({ field: { onChange, value } }) => (
+                  <PhoneInput
+                    value={value}
+                    onChange={onChange}
+                    defaultCountry="CO"
+                    placeholder="Ingresa tu número de teléfono"
+                    international
+                    countryCallingCodeEditable={false}
+                    className={`w-full ${errors.phone ? 'PhoneInput--error' : ''}`}
+                  />
+                )}
               />
               {errors.phone && (
                 <p className="mt-1 text-sm text-red-600">{errors.phone.message}</p>
