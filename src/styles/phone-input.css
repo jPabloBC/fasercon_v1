@@ -21,7 +21,7 @@
 .PhoneInputCountrySelect {
   border: none !important;
   border-radius: 0 !important;
-  padding: 0.625rem 0.75rem;
+  padding: 0.625rem 0.75rem 0.625rem 1rem;
   background: transparent !important;
   font-size: 0.875rem;
   cursor: pointer;
@@ -100,7 +100,7 @@
 /* Responsive */
 @media (max-width: 640px) {
   .PhoneInputCountrySelect {
-    padding: 0.5rem 0.5rem;
+    padding: 0.5rem 0.5rem 0.5rem 0.75rem;
     font-size: 0.75rem;
   }
   
