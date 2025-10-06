@@ -1,53 +1,83 @@
 /* Estilos personalizados para PhoneInput */
 .PhoneInput {
   display: flex;
-  align-items: center;
+  align-items: stretch;
 }
 
 .PhoneInputCountrySelect {
   border: 1px solid rgb(209 213 219);
   border-radius: 0.375rem 0 0 0.375rem;
-  padding: 0.5rem;
+  padding: 0.5rem 0.75rem;
   background: white;
   font-size: 0.875rem;
   cursor: pointer;
   border-right: none;
+  box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+  transition: all 0.15s ease-in-out;
 }
 
 .PhoneInputCountrySelect:focus {
   outline: none;
   border-color: #2563eb;
-  box-shadow: 0 0 0 1px #2563eb;
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.2);
 }
 
 .PhoneInputInput {
   border: 1px solid rgb(209 213 219) !important;
   border-radius: 0 0.375rem 0.375rem 0 !important;
   border-left: none !important;
+  padding: 0.625rem 0.875rem !important;
+  font-size: 0.875rem !important;
+  line-height: 1.25rem !important;
+  box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05) !important;
+  transition: all 0.15s ease-in-out !important;
+  background: white !important;
+  color: rgb(17 24 39) !important;
   flex: 1;
   min-width: 0;
+}
+
+.PhoneInputInput::placeholder {
+  color: rgb(156 163 175) !important;
 }
 
 .PhoneInputInput:focus {
   outline: none !important;
   border-color: #2563eb !important;
-  box-shadow: 0 0 0 1px #2563eb !important;
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.2) !important;
 }
 
 .PhoneInputCountryFlag {
   margin-right: 0.5rem;
+  height: 1em;
+  width: 1.33em;
 }
 
 /* Estados de error */
 .PhoneInput--error .PhoneInputCountrySelect,
 .PhoneInput--error .PhoneInputInput {
   border-color: #dc2626 !important;
+  box-shadow: 0 0 0 2px rgba(220, 38, 38, 0.2) !important;
+}
+
+/* Hover effects */
+.PhoneInputCountrySelect:hover {
+  border-color: rgb(156 163 175);
+}
+
+.PhoneInputInput:hover {
+  border-color: rgb(156 163 175) !important;
 }
 
 /* Responsive */
 @media (max-width: 640px) {
   .PhoneInputCountrySelect {
-    padding: 0.375rem;
+    padding: 0.5rem;
     font-size: 0.75rem;
+  }
+  
+  .PhoneInputInput {
+    padding: 0.5rem 0.75rem !important;
+    font-size: 0.75rem !important;
   }
 }

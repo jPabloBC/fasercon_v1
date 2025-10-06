@@ -67,7 +67,7 @@ export default function ContactForm() {
   const whatsappMessage = encodeURIComponent(
     'Hola, me interesa obtener información sobre sus servicios de cubiertas y techos metálicos.'
   )
-  const whatsappNumber = process.env.NEXT_PUBLIC_WHATSAPP_NUMBER || '573001234567'
+  const whatsappNumber = process.env.NEXT_PUBLIC_WHATSAPP_NUMBER || '56912345678'
   const whatsappUrl = `https://wa.me/${whatsappNumber}?text=${whatsappMessage}`
 
   return (
@@ -128,7 +128,7 @@ export default function ContactForm() {
                   <PhoneInput
                     value={value}
                     onChange={onChange}
-                    defaultCountry="CO"
+                    defaultCountry="CL"
                     placeholder="Ingresa tu número de teléfono"
                     international
                     countryCallingCodeEditable={false}
