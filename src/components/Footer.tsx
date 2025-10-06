@@ -38,6 +38,7 @@ export default function Footer() {
                 alt="Fasercom Logo"
                 width={120}
                 height={40}
+                style={{ height: 'auto' }}
                 className="h-10 w-auto"
               />
             </div>

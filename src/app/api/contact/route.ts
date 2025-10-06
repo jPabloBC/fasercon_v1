@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
-import { supabase } from '@/lib/supabase'
+import { supabaseAdmin } from '@/lib/supabase'
 
 const contactSchema = z.object({
   name: z.string().min(2, 'El nombre debe tener al menos 2 caracteres'),
@@ -24,7 +24,7 @@ export async function POST(request: NextRequest) {
     const validatedData = contactSchema.parse(body)
     
     // Guardar en la base de datos
-    const { data: contactForm, error } = await supabase
+    const { data: contactForm, error } = await supabaseAdmin
       .from('fasercon_contact_forms')
       .insert([
         {

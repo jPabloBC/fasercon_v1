@@ -6,7 +6,6 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import PhoneInput from 'react-phone-number-input'
 import 'react-phone-number-input/style.css'
-import '../styles/phone-input.css'
 
 const contactSchema = z.object({
   name: z.string().min(2, 'El nombre debe tener al menos 2 caracteres'),
@@ -55,9 +54,12 @@ export default function ContactForm() {
         setSubmitMessage('¡Mensaje enviado exitosamente! Te contactaremos pronto.')
         reset()
       } else {
+        const errorData = await response.text()
+        console.error('Error response:', errorData)
         setSubmitMessage('Error al enviar el mensaje. Por favor intenta nuevamente.')
       }
     } catch (error) {
+      console.error('Network error:', error)
       setSubmitMessage('Error al enviar el mensaje. Por favor intenta nuevamente.')
     } finally {
       setIsSubmitting(false)
@@ -133,7 +135,7 @@ export default function ContactForm() {
                     international
                     withCountryCallingCode
                     countryCallingCodeEditable={false}
-                    className={`w-full ${errors.phone ? 'PhoneInput--error' : ''}`}
+                    className="block w-full rounded-md border-0 px-3.5 py-2 text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 placeholder:text-gray-400 focus:ring-2 focus:ring-inset focus:ring-blue-600 sm:text-sm sm:leading-6"
                   />
                 )}
               />

@@ -7,6 +7,7 @@ import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import Link from 'next/link'
+import Image from 'next/image'
 
 const loginSchema = z.object({
   email: z.string().email('Email inválido'),
@@ -56,15 +57,21 @@ export default function LoginPage() {
       <div className="max-w-md w-full space-y-8">
         <div>
           <div className="flex justify-center">
-            <div className="w-12 h-12 bg-red-600 rounded-lg flex items-center justify-center">
-              <span className="text-white font-bold text-xl">F</span>
+            <div className="w-16 h-16 bg-white rounded-lg flex items-center justify-center shadow-lg border border-gray-200">
+              <Image
+                src="/assets/images/fasercon_logo.png"
+                alt="Fasercon Logo"
+                width={48}
+                height={48}
+                style={{ height: 'auto' }}
+              />
             </div>
           </div>
           <h2 className="mt-6 text-center text-3xl font-extrabold text-gray-900">
             Acceso al Panel Administrativo
           </h2>
           <p className="mt-2 text-center text-sm text-gray-600">
-            Fasercom - Sistema de Gestión
+            Fasercon - Sistema de Gestión
           </p>
         </div>
         <form className="mt-8 space-y-6" onSubmit={handleSubmit(onSubmit)}>
