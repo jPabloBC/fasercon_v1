@@ -131,6 +131,7 @@ export default function ContactForm() {
                     defaultCountry="CL"
                     placeholder="Ingresa tu número de teléfono"
                     international
+                    withCountryCallingCode
                     countryCallingCodeEditable={false}
                     className={`w-full ${errors.phone ? 'PhoneInput--error' : ''}`}
                   />

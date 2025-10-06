@@ -28,12 +28,22 @@
   box-shadow: none !important;
   transition: none;
   outline: none !important;
+  order: 1;
+  flex-shrink: 0;
+  border-right: 1px solid rgb(229 231 235) !important;
+  margin-right: 0;
+  min-width: auto;
 }
 
 .PhoneInputCountrySelect:focus {
   outline: none !important;
   border: none !important;
   box-shadow: none !important;
+}
+
+.PhoneInputCountrySelectArrow {
+  margin-left: 0.25rem;
+  opacity: 0.5;
 }
 
 .PhoneInputInput {
@@ -49,6 +59,7 @@
   flex: 1;
   min-width: 0;
   outline: none !important;
+  order: 2;
 }
 
 .PhoneInputInput::placeholder {
@@ -65,6 +76,7 @@
   margin-right: 0.5rem;
   height: 1em;
   width: 1.33em;
+  flex-shrink: 0;
 }
 
 /* Estados de error */
@@ -78,21 +90,11 @@
   box-shadow: 0 0 0 2px rgba(220, 38, 38, 0.2) !important;
 }
 
-/* Separador visual entre selector y input */
-.PhoneInputCountrySelect::after {
-  content: '';
-  position: absolute;
-  right: 0;
-  top: 20%;
-  bottom: 20%;
-  width: 1px;
-  background-color: rgb(229 231 235);
-}
-
+/* Asegurar que el código del país sea visible */
 .PhoneInputCountrySelect {
-  position: relative;
-  border-right: 1px solid rgb(229 231 235) !important;
-  margin-right: 0;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: flex-start !important;
 }
 
 /* Responsive */
