@@ -98,7 +98,7 @@ export default function QuoteCalculator() {
       } else {
         setSubmitMessage('Error al enviar la cotización. Por favor intenta nuevamente.')
       }
-    } catch (error) {
+    } catch {
       setSubmitMessage('Error al enviar la cotización. Por favor intenta nuevamente.')
     } finally {
       setIsSubmitting(false)

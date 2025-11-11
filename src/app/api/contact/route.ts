@@ -1,3 +1,32 @@
+export async function GET() {
+  try {
+    const { data: contacts, error } = await supabaseAdmin
+      .from('fasercon_contact_forms')
+      .select('*')
+      .order('created_at', { ascending: false })
+
+    if (error) {
+      console.error('Error al obtener contactos:', error)
+      return NextResponse.json({ error: 'Error al obtener los contactos' }, { status: 500 })
+    }
+
+    // Transformar snake_case a camelCase si es necesario
+    const transformedContacts = (contacts || []).map(contact => ({
+      id: contact.id,
+      name: contact.name,
+      email: contact.email,
+      phone: contact.phone,
+      message: contact.message,
+      status: contact.status,
+      createdAt: contact.created_at,
+    }))
+
+    return NextResponse.json(transformedContacts)
+  } catch (error) {
+    console.error('Error inesperado al obtener contactos:', error)
+    return NextResponse.json({ error: 'Error interno del servidor' }, { status: 500 })
+  }
+}
 import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { supabaseAdmin } from '@/lib/supabase'

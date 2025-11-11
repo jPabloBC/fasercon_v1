@@ -1,37 +1,41 @@
+
 'use client'
-
+import React, { useEffect, useState } from 'react'
 import Link from 'next/link'
-import Image from 'next/image'
-import { ChevronRightIcon, ChevronLeftIcon } from '@heroicons/react/20/solid'
-import { useState, useEffect } from 'react'
+import { ChevronRightIcon, ChevronLeftIcon } from '@heroicons/react/24/outline'
 
-export default function Hero() {
+const Hero = () => {
   const [currentSlide, setCurrentSlide] = useState(0)
-
   const slides = [
     {
       id: 1,
       image: "https://gbdoqxdldyszmfzqzmuk.supabase.co/storage/v1/object/public/fasercon/images/slideshow/IMG_20190414_114959%20Large.jpeg",
-      title: "Proyecto Industrial",
-      description: "Cubierta metálica de 2,500 m² con estructura de acero galvanizado y láminas termoacústicas de alta resistencia."
+      title: "Estructura Industrial",
+      // description: "Cubierta metálica de 2,500 m² con estructura de acero galvanizado y láminas termoacústicas de alta resistencia."
     },
     {
       id: 2,
       image: "https://gbdoqxdldyszmfzqzmuk.supabase.co/storage/v1/object/public/fasercon/images/slideshow/IMG_20190809_102801%20Large.jpeg",
-      title: "Proyecto Residencial",
-      description: "Techo metálico residencial con acabado premium, diseño moderno y garantía de 15 años contra corrosión."
+      title: "Cubiertas y Revestimiento",
+      // description: "Techo metálico residencial con acabado premium, diseño moderno y garantía de 15 años contra corrosión."
     },
     {
       id: 3,
       image: "https://gbdoqxdldyszmfzqzmuk.supabase.co/storage/v1/object/public/fasercon/images/slideshow/IMG_20220125_121654%20Large.jpeg",
-      title: "Construcción Comercial",
-      description: "Cubierta para centro comercial con sistema de drenaje integrado y paneles solares compatibles."
+      title: "Paneles Industriales",
+      // description: "Cubierta para centro comercial con sistema de drenaje integrado y paneles solares compatibles."
     },
     {
       id: 4,
       image: "https://gbdoqxdldyszmfzqzmuk.supabase.co/storage/v1/object/public/fasercon/images/slideshow/IMG-20170131-WA0000%20Large.jpeg",
-      title: "Construcción Comercial",
-      description: "Cubierta para centro comercial con sistema de drenaje integrado y paneles solares compatibles."
+      title: "Techos Industriales",
+      // description: "Cubierta para centro comercial con sistema de drenaje integrado y paneles solares compatibles."
+    },
+    {
+      id: 5,
+      image: "https://gbdoqxdldyszmfzqzmuk.supabase.co/storage/v1/object/public/fasercon/images/slideshow/clima_01.jpg",
+      title: "Climatización",
+      // description: "Cubierta para centro comercial con sistema de drenaje integrado y paneles solares compatibles."
     }
   ]
 
@@ -70,24 +74,23 @@ export default function Hero() {
         <div className="lg:grid lg:grid-cols-12 lg:gap-x-8 lg:gap-y-20 lg:items-start">
           <div className="relative z-10 mx-auto max-w-2xl lg:col-span-6 lg:max-w-none lg:pt-6 xl:col-span-5">
             <h1 className="text-4xl font-bold tracking-tight text-gray-900 sm:text-6xl font-sintony">
-              Cubiertas y Techos{' '}
-              <span className="text-red-600">Metálicos</span>{' '}
-              de Calidad Superior
+              Fabricación y servicios para la{' '}
+              <span className="text-red-600">Industria y Minería</span>{' '}
             </h1>
             <p className="mt-6 text-lg leading-8 text-gray-600 font-sintony font-normal">
               Especialistas en soluciones integrales para cubiertas industriales y residenciales. 
-              Ofrecemos diseño, fabricación e instalación de techos metálicos con materiales de 
+              Ofrecemos diseño, fabricación e instalación de cubiertas metálicas con materiales de 
               primera calidad y garantía extendida.
             </p>
             <div className="mt-10 flex items-center gap-x-6">
               <Link
-                href="#cotizador"
+                href="/quote"
                 className="rounded-md bg-red-600 px-3.5 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-red-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-600"
               >
-                Cotizar Proyecto
+                Cotizar
               </Link>
               <Link
-                href="#proyectos"
+                href="/projects"
                 className="text-sm font-semibold leading-6 text-gray-900 group inline-flex items-center"
               >
                 Ver Proyectos{' '}
@@ -95,7 +98,8 @@ export default function Hero() {
               </Link>
             </div>
             
-            {/* Stats */}
+            {/* Stats (comentado temporalmente para ocultarlo del home, se usará después) */}
+            {/*
             <div className="mt-16 flow-root sm:mt-24">
               <div className="-m-2 rounded-xl bg-gray-900/5 p-2 ring-1 ring-inset ring-gray-900/10 lg:-m-4 lg:rounded-2xl lg:p-4">
                 <dl className="grid grid-cols-2 gap-8 sm:grid-cols-4">
@@ -118,6 +122,7 @@ export default function Hero() {
                 </dl>
               </div>
             </div>
+            */}
           </div>
           <div className="relative mt-16 sm:mt-20 lg:col-span-6 lg:mt-0 xl:col-span-7">
             {/* Hero project slideshow */}
@@ -139,9 +144,9 @@ export default function Hero() {
                     <div className="absolute bottom-0 left-0 right-0 h-48 bg-gradient-to-t from-black/80 to-transparent"></div>
                     {/* Content overlay */}
                     <div className="absolute bottom-0 left-0 right-0 p-4 sm:p-6 text-white mb-6">
-                      <h3 className="text-lg sm:text-xl md:text-2xl font-bold mb-2 sm:mb-3 md:mb-4 font-sintony">{slide.title}</h3>
+                      <h3 className="text-2xl sm:text-3xl md:text-4xl font-bold mb-2 sm:mb-3 md:mb-4 font-sintony opacity-75">{slide.title}</h3>
                       <p className="text-gray-200 text-base sm:text-lg md:text-lg max-w-xs sm:max-w-sm md:max-w-md font-sintony font-normal leading-tight sm:leading-normal">
-                        {slide.description}
+                        {/* {slide.description} */}
                       </p>
                     </div>
                   </div>
@@ -201,3 +206,5 @@ export default function Hero() {
     </div>
   )
 }
+
+export default Hero

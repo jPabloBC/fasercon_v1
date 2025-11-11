@@ -5,12 +5,30 @@
   --foreground: #171717;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+/* Styles for react-phone-number-input */
+@import 'react-phone-number-input/style.css';
+
+/* Infinite marquee animation for clients logos */
+@keyframes marquee {
+  0% { transform: translateX(0); }
+  100% { transform: translateX(var(--marquee-end, -50%)); }
 }
+
+.animate-marquee {
+  animation: marquee var(--marquee-duration, 25s) linear infinite;
+  will-change: transform;
+  /* The track contains two concatenated copies; translating by the measured --marquee-end loops perfectly */
+}
+
+/* Fade mask for marquee edges: logos fade in/out at the viewport edges */
+.marquee-mask {
+  /* mask-image is preferred; include -webkit- prefix for Safari */
+  -webkit-mask-image: linear-gradient(to right, transparent 0%, black 8%, black 92%, transparent 100%);
+  mask-image: linear-gradient(to right, transparent 0%, black 8%, black 92%, transparent 100%);
+}
+
+/* Force light theme by not responding to system dark mode. If you later want
+   to re-enable dark mode, restore the prefers-color-scheme block above. */
 
 body {
   background: var(--background);

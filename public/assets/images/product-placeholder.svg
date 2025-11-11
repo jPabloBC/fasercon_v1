@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="400" height="300" viewBox="0 0 400 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Imagen no disponible">
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#f5f5f5"/>
+      <stop offset="100%" stop-color="#e9e9e9"/>
+    </linearGradient>
+  </defs>
+  <rect x="0" y="0" width="400" height="300" fill="url(#g)"/>
+  <rect x="16" y="12" width="368" height="276" rx="10" ry="10" fill="#fff" stroke="#d1d5db"/>
+  <g transform="translate(120,80)" fill="none" stroke="#9ca3af" stroke-width="6" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="0" y="0" width="160" height="120" rx="8" ry="8"/>
+    <circle cx="46" cy="36" r="16"/>
+    <path d="M12 110 L74 64 L120 92 L152 72"/>
+  </g>
+  <text x="200" y="265" text-anchor="middle" font-family="system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="16" fill="#9ca3af">
+    Imagen no disponible
+  </text>
+</svg>

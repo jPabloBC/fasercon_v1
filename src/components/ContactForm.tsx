@@ -52,7 +52,13 @@ export default function ContactForm() {
 
       if (response.ok) {
         setSubmitMessage('¡Mensaje enviado exitosamente! Te contactaremos pronto.')
-        reset()
+        setTimeout(() => {
+          reset({ name: '', email: '', phone: '', message: '' });
+          // Trigger update for admin dashboard
+          try {
+            localStorage.setItem('fasercon_contact_form_submitted', Date.now().toString());
+          } catch {}
+        }, 100);
       } else {
         const errorData = await response.text()
         console.error('Error response:', errorData)
@@ -74,118 +80,137 @@ export default function ContactForm() {
 
   return (
     <div id="contacto" className="relative isolate bg-white px-6 py-24 sm:py-32 lg:px-8">
-      <div className="mx-auto max-w-2xl text-center">
-        <h2 className="text-3xl font-bold tracking-tight text-gray-900 sm:text-4xl">
-          Contáctanos
-        </h2>
-        <p className="mt-2 text-lg leading-8 text-gray-600">
-          ¿Tienes un proyecto en mente? Estamos aquí para ayudarte.
-        </p>
-      </div>
-      <div className="mx-auto mt-16 max-w-xl sm:mt-20">
-        <div className="grid grid-cols-1 gap-x-8 gap-y-6 sm:grid-cols-2">
-          <div className="sm:col-span-2">
-            <label htmlFor="name" className="block text-sm font-semibold leading-6 text-gray-900">
-              Nombre completo
-            </label>
-            <div className="mt-2.5">
-              <input
-                {...register('name')}
-                type="text"
-                id="name"
-                autoComplete="name"
-                className="block w-full rounded-md border-0 px-3.5 py-2 text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 placeholder:text-gray-400 focus:ring-2 focus:ring-inset focus:ring-blue-600 sm:text-sm sm:leading-6"
-              />
-              {errors.name && (
-                <p className="mt-1 text-sm text-red-600">{errors.name.message}</p>
+      <div className="mx-auto max-w-5xl">
+        <div className="text-center mb-12">
+          <h2 className="text-3xl font-bold tracking-tight text-gray-900 sm:text-4xl">
+            Contáctanos
+          </h2>
+          <p className="mt-2 text-lg leading-8 text-gray-600">
+            ¿Tienes un proyecto en mente? Estamos aquí para ayudarte.
+          </p>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-10 items-stretch">
+          {/* Formulario */}
+          <div className="flex flex-col justify-stretch h-full">
+            <form onSubmit={handleSubmit(onSubmit)} className="flex flex-col h-full">
+              <div className="grid grid-cols-1 gap-x-8 gap-y-6 flex-1">
+                <div>
+                  <label htmlFor="name" className="block text-sm font-semibold leading-6 text-gray-900">
+                    Nombre completo
+                  </label>
+                  <div className="mt-2.5">
+                    <input
+                      {...register('name')}
+                      type="text"
+                      id="name"
+                      autoComplete="name"
+                      className="block w-full rounded-md border-0 px-3.5 py-2 text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 placeholder:text-gray-400 focus:ring-2 focus:ring-inset focus:ring-blue-600 sm:text-sm sm:leading-6"
+                    />
+                    {errors.name && (
+                      <p className="mt-1 text-sm text-red-600">{errors.name.message}</p>
+                    )}
+                  </div>
+                </div>
+                <div>
+                  <label htmlFor="email" className="block text-sm font-semibold leading-6 text-gray-900">
+                    Email
+                  </label>
+                  <div className="mt-2.5">
+                    <input
+                      {...register('email')}
+                      type="email"
+                      id="email"
+                      autoComplete="email"
+                      className="block w-full rounded-md border-0 px-3.5 py-2 text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 placeholder:text-gray-400 focus:ring-2 focus:ring-inset focus:ring-blue-600 sm:text-sm sm:leading-6"
+                    />
+                    {errors.email && (
+                      <p className="mt-1 text-sm text-red-600">{errors.email.message}</p>
+                    )}
+                  </div>
+                </div>
+                <div>
+                  <label htmlFor="phone" className="block text-sm font-semibold leading-6 text-gray-900">
+                    Teléfono
+                  </label>
+                  <div className="mt-2.5">
+                    <Controller
+                      name="phone"
+                      control={control}
+                      render={({ field: { onChange, value } }) => (
+                        <PhoneInput
+                          value={value}
+                          onChange={onChange}
+                          defaultCountry="CL"
+                          placeholder="Ingresa tu número de teléfono"
+                          international
+                          withCountryCallingCode
+                          countryCallingCodeEditable={false}
+                          className="block w-full rounded-md border-0 px-3.5 py-2 text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 placeholder:text-gray-400 focus:ring-2 focus:ring-inset focus:ring-blue-600 sm:text-sm sm:leading-6"
+                        />
+                      )}
+                    />
+                    {errors.phone && (
+                      <p className="mt-1 text-sm text-red-600">{errors.phone.message}</p>
+                    )}
+                  </div>
+                </div>
+                <div>
+                  <label htmlFor="message" className="block text-sm font-semibold leading-6 text-gray-900">
+                    Mensaje
+                  </label>
+                  <div className="mt-2.5">
+                    <textarea
+                      {...register('message')}
+                      id="message"
+                      rows={4}
+                      className="block w-full rounded-md border-0 px-3.5 py-2 text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 placeholder:text-gray-400 focus:ring-2 focus:ring-inset focus:ring-blue-600 sm:text-sm sm:leading-6"
+                    />
+                    {errors.message && (
+                      <p className="mt-1 text-sm text-red-600">{errors.message.message}</p>
+                    )}
+                  </div>
+                </div>
+              </div>
+              <div className="mt-10 flex flex-col sm:flex-row gap-4">
+                <button
+                  type="submit"
+                  disabled={isSubmitting}
+                  className="flex-1 rounded-md bg-red-600 px-3.5 py-2.5 text-center text-sm font-semibold text-white shadow-sm hover:bg-red-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-600 disabled:opacity-50"
+                >
+                  {isSubmitting ? 'Enviando...' : 'Enviar mensaje'}
+                </button>
+                <a
+                  href={whatsappUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex-1 rounded-md bg-green-600 px-3.5 py-2.5 text-center text-sm font-semibold text-white shadow-sm hover:bg-green-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-green-600"
+                >
+                  WhatsApp
+                </a>
+              </div>
+              {submitMessage && (
+                <div className={`mt-4 p-4 rounded-md ${
+                  submitMessage.includes('exitosamente') ? 'bg-green-50 text-green-800' : 'bg-red-50 text-red-800'
+                }`}>
+                  {submitMessage}
+                </div>
               )}
-            </div>
+            </form>
           </div>
-          <div>
-            <label htmlFor="email" className="block text-sm font-semibold leading-6 text-gray-900">
-              Email
-            </label>
-            <div className="mt-2.5">
-              <input
-                {...register('email')}
-                type="email"
-                id="email"
-                autoComplete="email"
-                className="block w-full rounded-md border-0 px-3.5 py-2 text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 placeholder:text-gray-400 focus:ring-2 focus:ring-inset focus:ring-blue-600 sm:text-sm sm:leading-6"
-              />
-              {errors.email && (
-                <p className="mt-1 text-sm text-red-600">{errors.email.message}</p>
-              )}
-            </div>
-          </div>
-          <div>
-            <label htmlFor="phone" className="block text-sm font-semibold leading-6 text-gray-900">
-              Teléfono
-            </label>
-            <div className="mt-2.5">
-              <Controller
-                name="phone"
-                control={control}
-                render={({ field: { onChange, value } }) => (
-                  <PhoneInput
-                    value={value}
-                    onChange={onChange}
-                    defaultCountry="CL"
-                    placeholder="Ingresa tu número de teléfono"
-                    international
-                    withCountryCallingCode
-                    countryCallingCodeEditable={false}
-                    className="block w-full rounded-md border-0 px-3.5 py-2 text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 placeholder:text-gray-400 focus:ring-2 focus:ring-inset focus:ring-blue-600 sm:text-sm sm:leading-6"
-                  />
-                )}
-              />
-              {errors.phone && (
-                <p className="mt-1 text-sm text-red-600">{errors.phone.message}</p>
-              )}
-            </div>
-          </div>
-          <div className="sm:col-span-2">
-            <label htmlFor="message" className="block text-sm font-semibold leading-6 text-gray-900">
-              Mensaje
-            </label>
-            <div className="mt-2.5">
-              <textarea
-                {...register('message')}
-                id="message"
-                rows={4}
-                className="block w-full rounded-md border-0 px-3.5 py-2 text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 placeholder:text-gray-400 focus:ring-2 focus:ring-inset focus:ring-blue-600 sm:text-sm sm:leading-6"
-              />
-              {errors.message && (
-                <p className="mt-1 text-sm text-red-600">{errors.message.message}</p>
-              )}
-            </div>
+          {/* Mapa */}
+          <div className="w-full h-[400px] md:h-auto rounded-lg overflow-hidden shadow-lg border border-gray-200 flex-1 flex">
+            <iframe
+              title="Ubicación Planta Fasercon"
+              src="https://maps.google.com/?q=-23.525135,-70.394020&output=embed"
+              width="100%"
+              height="100%"
+              style={{ border: 0, flex: 1, minHeight: 300, height: '100%' }}
+              allowFullScreen
+              loading="lazy"
+              referrerPolicy="no-referrer-when-downgrade"
+            ></iframe>
           </div>
         </div>
-        <div className="mt-10 flex flex-col sm:flex-row gap-4">
-          <button
-            type="submit"
-            onClick={handleSubmit(onSubmit)}
-            disabled={isSubmitting}
-            className="flex-1 rounded-md bg-red-600 px-3.5 py-2.5 text-center text-sm font-semibold text-white shadow-sm hover:bg-red-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-600 disabled:opacity-50"
-          >
-            {isSubmitting ? 'Enviando...' : 'Enviar mensaje'}
-          </button>
-          <a
-            href={whatsappUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="flex-1 rounded-md bg-green-600 px-3.5 py-2.5 text-center text-sm font-semibold text-white shadow-sm hover:bg-green-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-green-600"
-          >
-            WhatsApp
-          </a>
-        </div>
-        {submitMessage && (
-          <div className={`mt-4 p-4 rounded-md ${
-            submitMessage.includes('exitosamente') ? 'bg-green-50 text-green-800' : 'bg-red-50 text-red-800'
-          }`}>
-            {submitMessage}
-          </div>
-        )}
       </div>
     </div>
   )

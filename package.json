@@ -9,7 +9,8 @@
     "lint": "eslint",
     "db:migrate": "prisma migrate dev",
     "db:seed": "ts-node prisma/seed.ts",
-    "db:setup": "prisma migrate dev && npm run db:seed"
+    "db:setup": "prisma migrate dev && npm run db:seed",
+    "create-admin": "ts-node scripts/create-admin.ts"
   },
   "dependencies": {
     "@headlessui/react": "^2.2.9",
@@ -17,11 +18,17 @@
     "@hookform/resolvers": "^5.2.2",
     "@next-auth/prisma-adapter": "^1.0.7",
     "@supabase/supabase-js": "^2.58.0",
+    "@types/nodemailer": "^7.0.2",
     "bcryptjs": "^3.0.2",
     "clsx": "^2.1.1",
+    "dotenv": "^17.2.3",
+    "framer-motion": "^12.23.24",
+    "i18n-iso-countries": "7.14.0",
     "lucide-react": "^0.544.0",
     "next": "15.5.4",
     "next-auth": "^4.24.11",
+    "nodemailer": "^6.10.1",
+    "pdf-lib": "^1.17.1",
     "react": "19.1.0",
     "react-dom": "19.1.0",
     "react-hook-form": "^7.64.0",
@@ -34,7 +41,7 @@
     "@eslint/eslintrc": "^3",
     "@tailwindcss/postcss": "^4",
     "@types/bcryptjs": "^2.4.6",
-    "@types/node": "^20",
+    "@types/node": "^20.19.24",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "@types/react-phone-number-input": "^3.0.17",
@@ -42,6 +49,6 @@
     "eslint-config-next": "15.5.4",
     "tailwindcss": "^4",
     "ts-node": "^10.9.2",
-    "typescript": "^5"
+    "typescript": "^5.9.3"
   }
 }

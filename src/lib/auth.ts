@@ -13,26 +13,42 @@ export const authOptions: NextAuthOptions = {
       },
       async authorize(credentials) {
         if (!credentials?.email || !credentials?.password) {
+          console.log('No email or password provided')
           return null
         }
 
         const { data: user, error } = await supabase
-          .from('users')
+          .from('fasercon_users')
           .select('*')
           .eq('email', credentials.email)
+          .eq('is_active', true)
           .single()
 
-        if (error || !user) {
-          return null
+        console.log('Login intento:', {
+          email: credentials.email,
+          user,
+          error
+        })
+
+          if (error || !user) {
+            console.log("[AUTH] Usuario no encontrado", credentials.email);
+            throw new Error("El correo no existe");
         }
+
+        console.log('Comparando password:', {
+          inputPassword: credentials.password,
+          dbHash: user.password
+        })
 
         const isPasswordValid = await bcrypt.compare(
           credentials.password,
           user.password
         )
 
-        if (!isPasswordValid) {
-          return null
+        console.log('¿Password válido?', isPasswordValid)
+
+          if (!isPasswordValid) {
+            throw new Error("Contraseña incorrecta");
         }
 
         return {

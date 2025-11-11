@@ -5,8 +5,8 @@ import { PhoneIcon, EnvelopeIcon, MapPinIcon } from '@heroicons/react/24/outline
 const navigation = {
   company: [
     { name: 'Sobre Nosotros', href: '#' },
-    { name: 'Proyectos', href: '#proyectos' },
-    { name: 'Productos', href: '#productos' },
+  { name: 'Proyectos', href: '/projects' },
+  { name: 'Productos', href: '/products' },
     { name: 'Contacto', href: '#contacto' },
   ],
   services: [
@@ -29,37 +29,40 @@ export default function Footer() {
       <h2 id="footer-heading" className="sr-only">
         Footer
       </h2>
-      <div className="mx-auto max-w-7xl px-6 pb-8 pt-16 sm:pt-24 lg:px-8 lg:pt-32">
+      <div className="mx-auto max-w-7xl px-6 pb-4 pt-8 sm:pt-8 lg:px-8 lg:pt-16">
         <div className="xl:grid xl:grid-cols-3 xl:gap-8">
-          <div className="space-y-8">
-            <div className="flex items-center">
-              <Image
-                src="/assets/images/fasercon_logo_white.png"
-                alt="Fasercom Logo"
-                width={120}
-                height={40}
-                style={{ height: 'auto' }}
-                className="h-10 w-auto"
-              />
+          <div className="space-y-8 md:flex md:space-y-0 md:gap-8">
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center mb-4">
+                <Image
+                  src="/assets/images/fasercon_logo_white.png"
+                  alt="Fasercom Logo"
+                  width={120}
+                  height={40}
+                  style={{ height: 'auto' }}
+                  className="h-10 w-auto"
+                />
+              </div>
+              <p className="text-sm leading-6 text-gray-300">
+                Especialistas en cubiertas, techos y revestimientos metálicos de alta calidad. 
+                Más de 10 años de experiencia en proyectos industriales y residenciales.
+              </p>
+              <div className="space-y-3 mt-6">
+                <div className="flex items-center text-gray-300">
+                  <PhoneIcon className="h-5 w-5 mr-3" />
+                  <span className="text-sm">+56 9 9868 0862</span>
+                </div>
+                <div className="flex items-center text-gray-300">
+                  <EnvelopeIcon className="h-5 w-5 mr-3" />
+                  <span className="text-sm">arodriguez@fasercon.cl</span>
+                </div>
+                <div className="flex items-center text-gray-300">
+                  <MapPinIcon className="h-5 w-5 mr-3" />
+                  <span className="text-sm">Antofagasta, Chile</span>
+                </div>
+              </div>
             </div>
-            <p className="text-sm leading-6 text-gray-300">
-              Especialistas en cubiertas, techos y revestimientos metálicos de alta calidad. 
-              Más de 10 años de experiencia en proyectos industriales y residenciales.
-            </p>
-            <div className="space-y-3">
-              <div className="flex items-center text-gray-300">
-                <PhoneIcon className="h-5 w-5 mr-3" />
-                <span className="text-sm">+56 9 2345678</span>
-              </div>
-              <div className="flex items-center text-gray-300">
-                <EnvelopeIcon className="h-5 w-5 mr-3" />
-                <span className="text-sm">info@fasercom.cl</span>
-              </div>
-              <div className="flex items-center text-gray-300">
-                <MapPinIcon className="h-5 w-5 mr-3" />
-                <span className="text-sm">Antofagasta, Chile</span>
-              </div>
-            </div>
+            {/* Mapa eliminado por requerimiento */}
           </div>
           <div className="mt-16 grid grid-cols-2 gap-8 xl:col-span-2 xl:mt-0">
             <div className="md:grid md:grid-cols-2 md:gap-8">
@@ -116,9 +119,12 @@ export default function Footer() {
             </div>
           </div>
         </div>
-        <div className="mt-16 border-t border-white/10 pt-8 sm:mt-20 lg:mt-24">
+        <div className="mt-8 border-t border-white/10 pt-8 sm:mt-20 lg:mt-10">
           <p className="text-xs leading-5 text-gray-400">
             &copy; 2024 Fasercom. Todos los derechos reservados.
+          </p>
+          <p className="text-xs leading-5 text-gray-400 mt-2">
+            Nota: FASERCON también es referenciada ocasionalmente como &quot;Faseron&quot;.
           </p>
         </div>
       </div>

@@ -1,23 +1,81 @@
-'use client'
 
-import { useState } from 'react'
+'use client'
+import React, { useEffect, useState } from 'react'
 import Link from 'next/link'
 import Image from 'next/image'
 import { usePathname } from 'next/navigation'
-import { Bars3Icon, XMarkIcon, PhoneIcon } from '@heroicons/react/24/outline'
+import { useRouter } from 'next/navigation'
+import { Bars3Icon, XMarkIcon } from '@heroicons/react/24/outline'
 
 const navigation = [
   { name: 'Inicio', href: '/' },
-  { name: 'Productos', href: '#productos' },
-  { name: 'Proyectos', href: '#proyectos' },
+  { name: 'Servicios', href: '/services' },
+  { name: 'Productos', href: '/products' },
+  // { name: 'Proyectos', href: '/projects' },
+  { name: 'Clientes', href: '/clients' },
   { name: 'Contacto', href: '#contacto' },
 ]
 
 export default function Navbar() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
+  const [quoteCount, setQuoteCount] = useState(0)
   const pathname = usePathname()
+  const router = useRouter()
 
   const isActive = (path: string) => pathname === path
+
+  function handleNavClick(e: React.MouseEvent, href: string) {
+    // contact anchors like '#contacto' should navigate to home and scroll
+    if (href.startsWith('#')) {
+      e.preventDefault()
+      const id = href.replace('#', '')
+      if (pathname === '/') {
+        // already on home: scroll to element
+        const el = document.getElementById(id)
+        if (el) {
+          el.scrollIntoView({ behavior: 'smooth' })
+        }
+      } else {
+        // navigate to home with hash
+        router.push(`/${href}`)
+      }
+      return
+    }
+
+    // prevent navigation / full reload if we're already on the same path
+    if (pathname === href) {
+      e.preventDefault()
+    }
+  }
+
+  useEffect(() => {
+    function readCount() {
+      try {
+        const raw = localStorage.getItem('fasercon_quote')
+        const list = raw ? JSON.parse(raw) as Array<Record<string, unknown>> : []
+        const total = (list || []).reduce((s: number, it: Record<string, unknown>) => s + (Number(it.qty as unknown) || 0), 0)
+        setQuoteCount(total)
+      } catch {
+        setQuoteCount(0)
+      }
+    }
+
+    readCount()
+
+    // listen to storage events from other tabs
+    function onStorage(e: StorageEvent) {
+      if (e.key === 'fasercon_quote') readCount()
+    }
+
+    window.addEventListener('storage', onStorage)
+    // custom event for same-window updates
+    window.addEventListener('fasercon_quote_updated', readCount as EventListener)
+
+    return () => {
+      window.removeEventListener('storage', onStorage)
+      window.removeEventListener('fasercon_quote_updated', readCount as EventListener)
+    }
+  }, [])
 
   return (
     <header className="bg-white shadow-lg fixed w-full top-0 z-50 border-b border-gray-200">
@@ -27,11 +85,11 @@ export default function Navbar() {
             <span className="sr-only">Fasercom</span>
             <div className="flex items-center space-x-3">
               <Image
-                src="/assets/images/fasercon_logo.png"
+                src="/assets/images/fasercon_logo2.png"
                 alt="Fasercom Logo"
                 width={180}
                 height={60}
-                className="h-14 w-auto"
+                className="h-18 w-auto"
                 priority
               />
             </div>
@@ -52,8 +110,9 @@ export default function Navbar() {
             <Link
               key={item.name}
               href={item.href}
-              className={`text-sm font-semibold leading-6 hover:text-red-600 transition-colors ${
-                isActive(item.href) ? 'text-red-600' : 'text-gray-900'
+              onClick={(e) => handleNavClick(e, item.href)}
+              className={`text-lg font-semibold leading-6 hover:text-gray-700 transition-colors ${
+                isActive(item.href) ? 'text-red-600' : 'text-gray-400'
               }`}
             >
               {item.name}
@@ -62,10 +121,15 @@ export default function Navbar() {
         </div>
         <div className="hidden lg:flex lg:flex-1 lg:justify-end">
           <Link
-            href="#cotizador"
-            className="rounded-md bg-red-600 px-3.5 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-red-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-600 transition-colors"
+            href="/quote"
+            className="relative rounded-md bg-red-600 px-3.5 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-red-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-600 transition-colors"
           >
-            Cotizar Proyecto
+            Cotizador
+            {quoteCount > 0 && (
+              <span className="absolute -top-2 -right-2 inline-flex h-6 min-w-[1.5rem] items-center justify-center rounded-full bg-yellow-400 text-xs font-semibold text-red-600 px-1">
+                {quoteCount}
+              </span>
+            )}
           </Link>
         </div>
       </nav>
@@ -92,10 +156,13 @@ export default function Navbar() {
                     <Link
                       key={item.name}
                       href={item.href}
+                      onClick={(e) => {
+                        handleNavClick(e, item.href)
+                        setMobileMenuOpen(false)
+                      }}
                       className={`-mx-3 block rounded-lg px-3 py-2 text-base font-semibold leading-7 hover:bg-gray-50 ${
-                        isActive(item.href) ? 'text-red-600' : 'text-gray-900'
+                        isActive(item.href) ? 'text-red-600' : 'text-gray-400'
                       }`}
-                      onClick={() => setMobileMenuOpen(false)}
                     >
                       {item.name}
                     </Link>
@@ -103,11 +170,16 @@ export default function Navbar() {
                 </div>
                 <div className="py-6">
                   <Link
-                    href="#cotizador"
-                    className="block rounded-md bg-red-600 px-3.5 py-2.5 text-center text-sm font-semibold text-white shadow-sm hover:bg-red-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-600"
+                    href="/products"
+                    className="relative block rounded-md bg-red-600 px-3.5 py-2.5 text-center text-sm font-semibold text-white shadow-sm hover:bg-red-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-600"
                     onClick={() => setMobileMenuOpen(false)}
                   >
-                    Cotizar Proyecto
+                    Cotizador
+                    {quoteCount > 0 && (
+                      <span className="absolute top-0 right-0 translate-x-1/2 -translate-y-1/2 inline-flex h-5 w-5 items-center justify-center rounded-full bg-yellow-400 text-xs font-semibold text-red-600">
+                        {quoteCount}
+                      </span>
+                    )}
                   </Link>
                 </div>
               </div>

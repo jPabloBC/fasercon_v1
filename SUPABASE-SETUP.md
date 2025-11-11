@@ -6,6 +6,9 @@
 1. Ve a tu dashboard de Supabase
 2. Navega a SQL Editor 
 3. Ejecuta el archivo `database-schema.sql` completo
+4. Ejecuta las migraciones adicionales de este repo (si aplica):
+   - `database/migrations/20251029_add_fasercon_quotes.sql`
+   - `database/migrations/20251029_add_fasercon_quote_items.sql`
 
 ### 2. Crear usuario administrador
 1. Ejecuta el script para generar el hash de contraseña:
@@ -34,6 +37,7 @@ npm run dev
 - **users**: Administradores del sistema
 - **contact_forms**: Formularios de contacto del sitio web
 - **quotes**: Cotizaciones solicitadas por clientes
+- **fasercon_quote_items**: Ítems de productos por cotización (pre-venta)
 - **products**: Catálogo de productos de techos metálicos
 - **stock_movements**: Movimientos de inventario
 
