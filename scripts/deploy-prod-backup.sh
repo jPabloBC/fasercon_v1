@@ -3,7 +3,7 @@ set -euo pipefail
 # Config
 NAME="fasercon-v1"
 TS="$(date +"%Y%m%d-%H%M%S")"
-SCOPE="jpablobcs-projects"  # si no usas team/context, deja vacío: SCOPE=""
+SCOPE=""  # si no usas team/context, deja vacío: SCOPE=""
 mkdir -p backups
 # Git snapshot + tag
 git add -A
