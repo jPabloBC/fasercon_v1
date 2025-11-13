@@ -1,3 +1,26 @@
+// Utilidad para mostrar fracciones amigables
+function toFraction(value: string | number | null | undefined): string {
+  if (value == null || value === '') return '';
+  const num = typeof value === 'string' ? parseFloat(value) : value;
+  if (isNaN(num)) return String(value);
+  if (Number.isInteger(num)) return String(num);
+  const denominators = [2, 3, 4, 8, 16];
+  for (const d of denominators) {
+    const n = Math.round(num * d);
+    if (Math.abs(num - n / d) < 1e-6) {
+      const whole = Math.floor(num);
+      const remainder = n - whole * d;
+      if (whole > 0 && remainder > 0) {
+        return `${whole} ${remainder}/${d}`;
+      } else if (whole > 0 && remainder === 0) {
+        return `${whole}`;
+      } else {
+        return `${n}/${d}`;
+      }
+    }
+  }
+  return num.toFixed(2);
+}
 import { PDFDocument, rgb, StandardFonts, PDFName } from 'pdf-lib';
 import fs from 'fs';
 import path from 'path';
@@ -149,7 +172,7 @@ export async function generateQuotePDF({
     `Email: ${contact.email}`,
     `Teléfono: ${contact.phone}`,
   ];
-  if (contact.document) leftLines.push(`RUT/Doc.: ${contact.document}`);
+  if (contact.document) leftLines.push(`RUT/Documento: ${contact.document}`);
 
   const rightLines: string[] = [
     'Datos de la Empresa:',
@@ -427,10 +450,12 @@ export async function generateQuotePDF({
   items.forEach((item, idx) => {
     if (y < 100) return; // Avoid overflow
 
-    const baseRowHeight = 15; // Base height for each row
+    const baseRowHeight = 18; // Más alto para dejar espacio a SKU
     const characteristics = item.characteristics || [];
-    const totalRows = Math.max(1, characteristics.length); // At least one row for the product
-    const blockHeight = baseRowHeight * totalRows;
+    const totalRows = Math.max(1, characteristics.length);
+    // Si hay SKU, el bloque debe ser más alto
+    const hasSKU = !!item.sku;
+    const blockHeight = baseRowHeight * totalRows + (hasSKU ? 10 : 0);
 
     page.drawRectangle({
       x: 40,
@@ -443,20 +468,20 @@ export async function generateQuotePDF({
     // Draw product name
     page.drawText(item.name.substring(0, 35), {
       x: 50,
-      y: y - 10, // Position name higher
-      size: 10, // Match size with other columns
+      y: y - 12, // Un poco más abajo
+      size: 10,
       font: fontRegular,
       color: darkGray,
     });
 
-    // Draw SKU below the name
+    // Draw SKU justo debajo del nombre, dentro del bloque
     if (item.sku) {
       page.drawText(`SKU: ${item.sku}`, {
         x: 50,
-        y: y - 25, // Position SKU lower
-        size: 8, // Smaller size for SKU
+        y: y - 22, // Solo 10px debajo del nombre
+        size: 8,
         font: fontRegular,
-        color: rgb(0.5, 0.5, 0.5), // Lighter gray
+        color: rgb(0.5, 0.5, 0.5),
       });
     }
 
@@ -474,8 +499,27 @@ export async function generateQuotePDF({
 
     // Draw other columns, vertically centered
     const centeredY = y - blockHeight / 2;
+    // Mostrar unidad con símbolo amigable
+    const unitSymbols: Record<string, string> = {
+      in: '"',
+      ft: "'",
+      m: 'm',
+      cm: 'cm',
+      mm: 'mm',
+      kg: 'kg',
+      g: 'g',
+      ton: 't',
+      l: 'l',
+      unit: '',
+      box: ' caja',
+      pack: ' paquete',
+      roll: ' rollo',
+      other: '',
+    };
     if (item.unit_size && item.measurement_unit) {
-      page.drawText(`${item.unit_size} ${item.measurement_unit}`, {
+      const symbol = unitSymbols[item.measurement_unit] ?? item.measurement_unit;
+      const unitSizeStr = toFraction(item.unit_size);
+      page.drawText(`${unitSizeStr}${symbol ? ' ' + symbol : ''}`, {
         x: 420, // Unit column
         y: centeredY,
         size: 10, // Match size with other columns

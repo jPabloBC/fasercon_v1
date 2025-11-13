@@ -10,7 +10,7 @@ import {
   XMarkIcon,
 } from '@heroicons/react/24/outline';
 import { usePathname, useRouter } from 'next/navigation';
-import { signOut } from 'next-auth/react';
+import { signOut, useSession } from 'next-auth/react';
 import React, { Fragment } from 'react';
 
 const NAV = [
@@ -20,6 +20,7 @@ const NAV = [
   { id: 'contacts', name: 'Contactos', icon: UserGroupIcon, href: '/dashboard/contact' },
   { id: 'contact-form', name: 'Formulario', icon: ClipboardDocumentListIcon, href: '/dashboard/contact-form' },
   { id: 'suppliers', name: 'Proveedores', icon: TruckIcon, href: '/dashboard/suppliers' },
+  { id: 'services', name: 'Servicios', icon: ClipboardDocumentListIcon, href: '/dashboard/services' },
   { id: 'settings', name: 'Configuración', icon: Cog6ToothIcon, href: '/dashboard/settings' },
 ];
 
@@ -36,8 +37,29 @@ export default function DashboardAside({
   setMobileVisible: (v: boolean) => void;
   className?: string;
 }) {
+  const { data: session, status } = useSession();
   const pathname = usePathname();
   const router = useRouter();
+
+  // Bloqueo: primero evaluar el tipo de rol
+  if (status === 'loading' || !session) return null;
+  const role = session?.user?.role;
+  let filteredNav = NAV;
+  if (role === 'dev') {
+    // Dev: sin restricciones, mostrar todo
+    filteredNav = NAV;
+  } else if (role === 'admin') {
+    // Mostrar aside sin 'settings'
+    filteredNav = NAV.filter(tab => tab.id !== 'settings');
+  } else if (role === 'user') {
+    const screens = Array.isArray(session.user?.screens) ? session.user.screens : [];
+    if (!screens.length) return null;
+    // Mostrar solo screens permitidas
+    filteredNav = NAV.filter(tab => screens.includes(tab.id));
+  } else {
+    // Si el rol no es válido, no mostrar nada
+    return null;
+  }
 
   const asideContent = (
     <>
@@ -58,7 +80,7 @@ export default function DashboardAside({
         </button>
       </div>
       <nav className="flex-1 space-y-2 px-2">
-        {NAV.map((tab) => (
+        {filteredNav.map((tab) => (
           <button
             key={tab.id}
             onClick={() => {
@@ -89,7 +111,7 @@ export default function DashboardAside({
         </button>
       </div>
       {/* Collapse button at the bottom right edge of the aside */}
-      <div className="hidden lg:block absolute z-50" style={{ bottom: '24px', right: '-12px' }}>
+  <div className="hidden lg:block absolute z-50" style={{ bottom: '24px', right: '8px' }}>
         <button
           onClick={() => setCollapsed(!isCollapsed)}
           className="bg-white p-1 rounded-full shadow-md hover:bg-gray-100 focus:outline-none border border-gray-200"
@@ -111,12 +133,12 @@ export default function DashboardAside({
     <>
       {/* Mobile sidebar */}
       <div
-        className={`fixed inset-0 bg-gray-900 bg-opacity-50 z-20 lg:hidden transition-opacity duration-300 ${isMobileVisible ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}
+        className={`fixed inset-0 bg-gray-900 bg-opacity-50 z-40 lg:hidden transition-opacity duration-300 ${isMobileVisible ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}
         onClick={() => setMobileVisible(false)}
         aria-hidden="true"
       ></div>
       <div
-        className={`fixed inset-y-0 left-0 bg-white border-r border-gray-200 flex flex-col py-4 z-30 transition-transform duration-300 transform lg:hidden ${isMobileVisible ? 'translate-x-0' : '-translate-x-full'} w-64`}>
+        className={`fixed inset-y-0 left-0 bg-white border-r border-gray-200 flex flex-col py-4 z-50 transition-transform duration-300 transform lg:hidden ${isMobileVisible ? 'translate-x-0' : '-translate-x-full'} w-64`}>
         {asideContent}
       </div>
 

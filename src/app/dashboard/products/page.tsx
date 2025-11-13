@@ -1207,6 +1207,22 @@ export default function DashboardProductsPage() {
             allSuppliers={allSuppliers}
             unitLabels={unitLabels}
             bulkState={bulk}
+            onBulkChange={(field, value) => {
+              setBulk(prev => {
+                if (field in prev) {
+                  const k = field as keyof typeof prev;
+                  return {
+                    ...prev,
+                    [k]: {
+                      ...prev[k],
+                      value,
+                      changed: true
+                    }
+                  };
+                }
+                return prev;
+              });
+            }}
           />
           <div>
             <label className="block text-sm font-medium mb-1 text-gray-800">Imágenes (todos)</label>
@@ -1310,9 +1326,9 @@ export default function DashboardProductsPage() {
         </div>
         <main className="flex-1 flex flex-col">
           <div className="mx-auto w-full flex-1 flex flex-col">
-            <div className="flex items-center justify-between mb-6">
+            <div className="flex items-center justify-between">
               {/* Botones flotantes fijos debajo del header, a la derecha */}
-              <div className="fixed top-[70px] right-4 z-40 flex flex-col gap-3 items-end">
+              <div className="fixed top-[70px] right-4 z-30 flex flex-col gap-3 items-end">
                 <div className="flex flex-row gap-2 items-center">
                   {selectedIds.length > 0 && (
                     <>
@@ -1336,15 +1352,14 @@ export default function DashboardProductsPage() {
                     onClick={() => setShowCreateForm(prev => !prev)}
                     aria-label={showCreateForm ? 'Cerrar crear producto' : 'Crear producto'}
                     title={showCreateForm ? 'Cerrar crear producto' : 'Crear producto'}
-                    className="p-4 rounded-full bg-red-600 text-white shadow-lg hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-400 transition-all text-2xl flex items-center justify-center"
-                    style={{ minWidth: '3.2rem', minHeight: '3.2rem' }}
+                    className="p-2 rounded-full bg-red-600 text-white shadow-lg hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-400 transition-all flex items-center justify-center"
                   >
                     {showCreateForm ? (
-                      <svg xmlns="http://www.w3.org/2000/svg" className="h-7 w-7" viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
+                      <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" />
                       </svg>
                     ) : (
-                      <svg xmlns="http://www.w3.org/2000/svg" className="h-7 w-7" viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
+                      <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 4v16M4 12h16" />
                       </svg>
                     )}

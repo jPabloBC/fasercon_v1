@@ -3,9 +3,10 @@ import { revalidatePath } from 'next/cache'
 
 export async function POST() {
   try {
-    // Revalidate the home and products pages so ProductGallery shows latest data
-    revalidatePath('/')
-    revalidatePath('/products')
+  // Revalidate the home, products and services pages so public views show latest data
+  revalidatePath('/')
+  revalidatePath('/products')
+  revalidatePath('/services')
     return NextResponse.json({ revalidated: true })
   } catch (err) {
     console.error('Revalidate error', err)

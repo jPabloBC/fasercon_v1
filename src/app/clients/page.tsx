@@ -157,7 +157,7 @@ export default function ClientsPage() {
 
 			{/* Heading above the logos bar */}
 			<div className="absolute left-0 right-0 top-[73%] transform -translate-y-1/2 z-30 flex justify-center">
-				<h1 className="text-4xl md:text-6xl font-normal text-white/50 text-center">
+				<h1 className="text-3xl md:text-5xl font-normal text-white/50 text-center">
 					Nuestros Clientes
 				</h1>
 			</div>

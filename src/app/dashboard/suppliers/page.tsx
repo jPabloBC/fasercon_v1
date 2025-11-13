@@ -228,7 +228,7 @@ export default function SuppliersPage() {
   }
 
   return (
-    <div className="p-6">
+  <div className="p-2">
       <h1 className="text-2xl font-bold text-gray-900 mb-4">Proveedores</h1>
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-2">
@@ -249,47 +249,77 @@ export default function SuppliersPage() {
         {message && <div className="mb-2 text-sm text-green-700">{message}</div>}
         {errorMessage && <div className="mb-2 text-sm text-red-700">{errorMessage}</div>}
         {loading ? <div>Cargando...</div> : (
-          <div className="overflow-x-auto">
-            <table className="min-w-full border-collapse table-auto">
-              <thead>
-                <tr className="bg-gray-100 text-left">
-                  <th className="px-3 py-2 text-sm font-semibold text-gray-700 border-b">Nombre</th>
-                  <th className="px-3 py-2 text-sm font-semibold text-gray-700 border-b">Email</th>
-                  <th className="px-3 py-2 text-sm font-semibold text-gray-700 border-b">Dirección</th>
-                  <th className="px-3 py-2 text-sm font-semibold text-gray-700 border-b">País</th>
-                  <th className="px-3 py-2 text-sm font-semibold text-gray-700 border-b">Teléfono</th>
-                  <th className="px-3 py-2 text-sm font-semibold text-gray-700 border-b">Website</th>
-                  <th className="px-3 py-2 text-sm font-semibold text-gray-700 border-b">Acciones</th>
-                </tr>
-              </thead>
-              <tbody>
-                {suppliers.map(s => (
-                  <tr key={s.id} className="odd:bg-white even:bg-gray-50">
-                    <td className="px-3 py-2 align-top border-b">
-                      <div className="font-medium text-gray-900">{s.name}</div>
-                      <div className="text-xs font-mono text-gray-500">{(s.id || '').split('-')[0]}</div>
-                    </td>
-                    <td className="px-3 py-2 align-top border-b text-sm text-gray-700">{s.email || ''}</td>
-                    <td className="px-3 py-2 align-top border-b text-sm text-gray-700">{s.address || ''}</td>
-                    <td className="px-3 py-2 align-top border-b text-sm text-gray-700">{s.country || ''}</td>
-                    <td className="px-3 py-2 align-top border-b text-sm text-gray-700">
-                      {(s.phone ?? s.contact_info?.phone) || ''}
-                    </td>
-                    <td className="px-3 py-2 align-top border-b text-sm text-gray-700">
+          <div>
+            {/* Mobile: cards */}
+            <div className="space-y-3 md:hidden">
+              {suppliers.map(s => (
+                <div key={s.id} className="bg-white rounded p-4 shadow-sm border">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex-1 min-w-0">
+                      <div className="font-medium text-gray-900 break-words">{s.name}</div>
+                      <div className="text-xs font-mono text-gray-500 truncate">{(s.id || '').split('-')[0]}</div>
+                      {s.email && <div className="text-sm text-gray-700 truncate">{s.email}</div>}
+                      {s.address && <div className="text-sm text-gray-700 truncate">{s.address}</div>}
+                      <div className="text-sm text-gray-700">{s.country || ''}</div>
+                      <div className="text-sm text-gray-700">{(s.phone ?? s.contact_info?.phone) || ''}</div>
                       {(() => {
                         const raw = s.website ?? s.contact_info?.website
-                        if (!raw) return ''
+                        if (!raw) return null
                         const url = /^https?:\/\//i.test(raw) ? raw : `https://${raw}`
-                        return (<a href={url} target="_blank" rel="noopener noreferrer" className="text-blue-600 underline">{raw}</a>)
+                        return (<div className="text-sm mt-1"><a href={url} target="_blank" rel="noopener noreferrer" className="text-blue-600 underline truncate">{raw}</a></div>)
                       })()}
-                    </td>
-                    <td className="px-3 py-2 align-top border-b text-sm text-gray-700">
-                      <button disabled={busy} onClick={() => { startEdit(s) }} className="px-2 py-1 bg-yellow-400 text-black rounded">Editar</button>
-                    </td>
+                    </div>
+                    <div className="flex-shrink-0 flex flex-col items-end gap-2">
+                      <button disabled={busy} onClick={() => { startEdit(s) }} className="px-2 py-1 bg-yellow-400 text-black rounded text-sm">Editar</button>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* Desktop: table */}
+            <div className="hidden md:block overflow-x-auto">
+              <table className="min-w-full border-collapse table-auto">
+                <thead>
+                  <tr className="bg-gray-100 text-left">
+                    <th className="px-3 py-2 text-sm font-semibold text-gray-700 border-b">Nombre</th>
+                    <th className="px-3 py-2 text-sm font-semibold text-gray-700 border-b">Email</th>
+                    <th className="px-3 py-2 text-sm font-semibold text-gray-700 border-b">Dirección</th>
+                    <th className="px-3 py-2 text-sm font-semibold text-gray-700 border-b">País</th>
+                    <th className="px-3 py-2 text-sm font-semibold text-gray-700 border-b">Teléfono</th>
+                    <th className="px-3 py-2 text-sm font-semibold text-gray-700 border-b">Website</th>
+                    <th className="px-3 py-2 text-sm font-semibold text-gray-700 border-b">Acciones</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {suppliers.map(s => (
+                    <tr key={s.id} className="odd:bg-white even:bg-gray-50">
+                      <td className="px-3 py-2 align-top border-b max-w-[200px]">
+                        <div className="font-medium text-gray-900 break-words">{s.name}</div>
+                        <div className="text-xs font-mono text-gray-500 truncate">{(s.id || '').split('-')[0]}</div>
+                      </td>
+                      <td className="px-3 py-2 align-top border-b text-sm text-gray-700 max-w-[200px] truncate">{s.email || ''}</td>
+                      <td className="px-3 py-2 align-top border-b text-sm text-gray-700 max-w-[240px] break-words">{s.address || ''}</td>
+                      <td className="px-3 py-2 align-top border-b text-sm text-gray-700">{s.country || ''}</td>
+                      <td className="px-3 py-2 align-top border-b text-sm text-gray-700">{(s.phone ?? s.contact_info?.phone) || ''}</td>
+                      <td className="px-3 py-2 align-top border-b text-sm text-gray-700 max-w-[200px]">
+                        {(() => {
+                          const raw = s.website ?? s.contact_info?.website
+                          if (!raw) return ''
+                          const url = /^https?:\/\//i.test(raw) ? raw : `https://${raw}`
+                          return (<a href={url} target="_blank" rel="noopener noreferrer" className="text-blue-600 underline truncate block max-w-[180px]">{raw}</a>)
+                        })()}
+                      </td>
+                      <td className="px-3 py-2 align-top border-b text-sm text-gray-700">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <button disabled={busy} onClick={() => { startEdit(s) }} className="px-2 py-1 bg-yellow-400 text-black rounded text-sm">Editar</button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
         )}
 

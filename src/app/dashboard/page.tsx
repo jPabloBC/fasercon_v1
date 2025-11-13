@@ -150,7 +150,7 @@ export default function DashboardPage() {
     <>
       {/* Remove DashboardHeader, now rendered in layout */}
       {/* <DashboardHeader title="Panel Administrativo" subtitle={`Bienvenido, ${session.user?.name || session.user?.email}`}/> */}
-      <main className="flex-1 p-4">
+      <main className="flex-1 p-4 mt-2">
         {activeTab === 'overview' && (
         <div>
           {/* Stats Cards */}

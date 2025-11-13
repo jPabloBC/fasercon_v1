@@ -15,9 +15,13 @@ export const supabase = (() => {
 let supabaseAdminInstance;
 export const supabaseAdmin = (() => {
   if (!supabaseAdminInstance) {
+    const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    if (!serviceKey && process.env.NODE_ENV === 'production') {
+      console.warn('WARNING: SUPABASE_SERVICE_ROLE_KEY not set in production. Using anon key - some data may not be visible due to RLS policies.');
+    }
     supabaseAdminInstance = createClient(
       supabaseUrl,
-      process.env.SUPABASE_SERVICE_ROLE_KEY || supabaseAnonKey
+      serviceKey || supabaseAnonKey
     );
   }
   return supabaseAdminInstance;

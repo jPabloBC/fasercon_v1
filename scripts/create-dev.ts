@@ -21,12 +21,12 @@ const supabase = createClient(supabaseUrl, supabaseServiceKey)
 
 async function createAdminUser() {
   try {
-    // Datos del usuario admin inicial
+    // Datos del usuario dev inicial
     const adminData = {
-      email: 'jpablobc@outlook.com',
-      password: 'admin123', // Cambiar esta contraseña después del primer login
-      name: 'Administrador Fasercon',
-      role: 'ADMIN'
+      email: 'gerencia@ingenit.cl', // Correo del usuario
+      password: 'bycta1-vamxes-suhdUr', // Contraseña segura
+      name: 'Juan Pablo Bernal Castro', // Nombre del usuario
+      role: 'dev' // Rol del usuario
     }
 
     // Encriptar la contraseña

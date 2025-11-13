@@ -110,14 +110,42 @@ export default function ProductEditor({
                 return String(val)
             }
 
-  const handleChange = (e: ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
-    const { name, value } = e.target;
-    if (isBulk && onBulkChange) {
-      onBulkChange(name, value);
-    } else if (onProductChange) {
-      onProductChange(name as keyof Product, value);
-    }
-  };
+
+    // Estado local para los campos en modo bulk
+    const [localBulk, setLocalBulk] = useState<Record<string, string>>({});
+
+    useEffect(() => {
+        if (isBulk && bulkState) {
+            // Inicializa localBulk con los valores actuales de bulkState
+            const initial: Record<string, string> = {};
+            Object.keys(bulkState).forEach(k => {
+                initial[k] = bulkState[k]?.value ?? '';
+            });
+            setLocalBulk(initial);
+        }
+        
+    }, [isBulk, bulkState]);
+
+    const handleBulkInput = (e: ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
+        const { name, value } = e.target;
+        setLocalBulk(prev => ({ ...prev, [name]: value }));
+    };
+
+    const handleBulkBlur = (e: ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
+        const { name, value } = e.target;
+        if (onBulkChange) {
+            onBulkChange(name, value);
+        }
+    };
+
+    const handleChange = (e: ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
+        const { name, value } = e.target;
+        if (isBulk) {
+            setLocalBulk(prev => ({ ...prev, [name]: value }));
+        } else if (onProductChange) {
+            onProductChange(name as keyof Product, value);
+        }
+    };
 
   const handlePriceChange = (e: ChangeEvent<HTMLInputElement>) => {
     const raw = e.target.value;
@@ -204,8 +232,9 @@ export default function ProductEditor({
             <input
             type="text"
             name="name"
-            value={getString('name')}
-            onChange={handleChange}
+            value={isBulk ? (localBulk.name ?? '') : getString('name')}
+            onChange={isBulk ? handleBulkInput : handleChange}
+            onBlur={isBulk ? handleBulkBlur : undefined}
             placeholder={isMixed('name') ? '---' : 'Nombre del producto'}
             className="mt-1 block w-full px-3 py-2 bg-white border border-gray-300 rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-red-500 focus:border-red-500 sm:text-sm"
             />
@@ -216,8 +245,9 @@ export default function ProductEditor({
             <input
             type="text"
             name="sku"
-            value={getString('sku')}
-            onChange={handleChange}
+            value={isBulk ? (localBulk.sku ?? '') : getString('sku')}
+            onChange={isBulk ? handleBulkInput : handleChange}
+            onBlur={isBulk ? handleBulkBlur : undefined}
             placeholder={isMixed('sku') ? '---' : 'SKU del producto'}
             className="mt-1 block w-full px-3 py-2 bg-white border border-gray-300 rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-red-500 focus:border-red-500 sm:text-sm"
             />
@@ -230,6 +260,7 @@ export default function ProductEditor({
             name="price"
             value={getPriceValue()}
             onChange={handlePriceChange}
+            onBlur={isBulk ? handleBulkBlur : undefined}
             placeholder={isMixed('price') ? '---' : 'Precio'}
             className="mt-1 block w-full px-3 py-2 bg-white border border-gray-300 rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-red-500 focus:border-red-500 sm:text-sm"
             />
@@ -240,8 +271,9 @@ export default function ProductEditor({
             <input
             type="number"
             name="order"
-            value={getString('order')}
-            onChange={handleChange}
+            value={isBulk ? (localBulk.order ?? '') : getString('order')}
+            onChange={isBulk ? handleBulkInput : handleChange}
+            onBlur={isBulk ? handleBulkBlur : undefined}
             placeholder={isMixed('order') ? '---' : '0'}
             className="mt-1 block w-full px-3 py-2 bg-white border border-gray-300 rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-red-500 focus:border-red-500 sm:text-sm"
             />
@@ -252,8 +284,9 @@ export default function ProductEditor({
             <input
             type="number"
             name="stock"
-            value={getString('stock')}
-            onChange={handleChange}
+            value={isBulk ? (localBulk.stock ?? '') : getString('stock')}
+            onChange={isBulk ? handleBulkInput : handleChange}
+            onBlur={isBulk ? handleBulkBlur : undefined}
             placeholder={isMixed('stock') ? '---' : '0'}
             className="mt-1 block w-full px-3 py-2 bg-white border border-gray-300 rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-red-500 focus:border-red-500 sm:text-sm"
             />

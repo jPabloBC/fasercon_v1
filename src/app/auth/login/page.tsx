@@ -1,4 +1,3 @@
-
 'use client'
 
 import { signIn } from 'next-auth/react';
@@ -46,28 +45,40 @@ export default function LoginPage() {
   const [showPassword, setShowPassword] = useState(false);
 
   const onSubmit = async (data: LoginFormData) => {
-    setIsLoading(true)
-    setError('')
+    setIsLoading(true);
+    setError('');
 
     try {
       const result = await signIn('credentials', {
         email: data.email,
         password: data.password,
         redirect: false,
-      })
+      });
 
       if (result?.error) {
+        if (result.error.includes('correo no existe')) {
+          setError('El correo electrónico no está registrado.');
+        } else if (result.error.includes('Contraseña incorrecta')) {
+          setError('La contraseña es incorrecta.');
+        } else {
+          setError(result.error);
+        }
       } else {
-        router.push('/dashboard')
+        router.push('/dashboard');
       }
     } catch (err) {
-      // Log error for debugging and show a generic message to the user
-      console.error('Login error:', err)
-      setError('Error al iniciar sesión')
+      console.error('Login error:', err);
+      setError('Error al iniciar sesión.');
     } finally {
-      setIsLoading(false)
+      setIsLoading(false);
     }
   }
+
+  const clearErrorOnInput = () => {
+    if (error) {
+      setError('');
+    }
+  };
 
   return (
     <>
@@ -105,8 +116,9 @@ export default function LoginPage() {
                 id="email"
                 type="email"
                 autoComplete="email"
-                className="appearance-none rounded-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-t-md focus:outline-none focus:ring-red-500 focus:border-red-500 focus:z-10 sm:text-sm"
+                className="appearance-none rounded-none relative block w-full px-3 py-4 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-t-md focus:outline-none focus:ring-red-500 focus:border-red-500 focus:z-10 sm:text-sm"
                 placeholder="Email"
+                onChange={clearErrorOnInput}
               />
               {errors.email && (
                 <p className="mt-1 text-sm text-red-600">{errors.email.message}</p>
@@ -121,8 +133,9 @@ export default function LoginPage() {
                 id="password"
                 type={showPassword ? "text" : "password"}
                 autoComplete="current-password"
-                className="appearance-none rounded-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-b-md focus:outline-none focus:ring-red-500 focus:border-red-500 focus:z-10 sm:text-sm"
+                className="appearance-none rounded-none relative block w-full px-3 py-4 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-b-md focus:outline-none focus:ring-red-500 focus:border-red-500 focus:z-10 sm:text-sm"
                 placeholder="Contraseña"
+                onChange={clearErrorOnInput}
               />
               <button
                 type="button"

@@ -1,7 +1,8 @@
 "use client"
-import React, { useEffect, useState, useRef } from 'react'
+import React, { useEffect, useState, useRef, useMemo } from 'react'
 import Link from 'next/link'
 import Image from 'next/image'
+import { supabase } from '../lib/supabase'
 
 type Service = {
   id: string | number
@@ -22,58 +23,137 @@ type Props = {
 // Use a local copy first to avoid external blocking; fallback can remain remote if needed
 const DEFAULT_IMAGE = '/assets/images/clima_01.jpg'
 
-const DEFAULT_SERVICES: Service[] = [
-  { id: 1, title: 'Fabricación a medida', description: 'Perfiles y estructuras a medida para proyectos industriales.', image: DEFAULT_IMAGE, href: '/services#fabricacion' },
-  { id: 2, title: 'Instalación de cubiertas', description: 'Instalación profesional y puesta en obra de techos metálicos.', image: DEFAULT_IMAGE, href: '/services#instalacion' },
-  { id: 3, title: 'Mantenimiento y reparación', description: 'Servicios de mantención preventiva y correctiva.', image: DEFAULT_IMAGE, href: '/services#mantenimiento' },
-  { id: 4, title: 'Climatización', description: 'Soluciones integrales de climatización y ventilación.', image: DEFAULT_IMAGE, href: '/services#climatizacion' },
-]
-
 const DEFAULT_INTRO = 'Somos especialistas en fabricación y montaje de estructuras metálicas, sistemas de soportación y soluciones industriales a medida. Combinamos experiencia, tecnología y precisión para entregar resultados de alta calidad en cada proyecto.'
 
-export default function ServicesCarousel({ services = DEFAULT_SERVICES, showAll = false, variant = 'compact', intro = DEFAULT_INTRO, showTitle = true }: Props) {
-  // If the server passed an empty array, show local mock services so the UI is visible
-  const MOCK_SERVICES: Service[] = [
-    { id: 'm1', title: 'Fabricación de estructuras', description: 'Fabricación de estructuras metálicas livianas y pesadas', image: ['https://gbdoqxdldyszmfzqzmuk.supabase.co/storage/v1/object/public/fasercon/images/services/services_estructuras01.jpeg', 'https://gbdoqxdldyszmfzqzmuk.supabase.co/storage/v1/object/public/fasercon/images/services/services_estructuras03.jpeg', 'https://gbdoqxdldyszmfzqzmuk.supabase.co/storage/v1/object/public/fasercon/images/services/services_estructuras04.jpeg'] },
-    
-    { id: 'm2', title: 'Soportes eléctricos', description: 'Fabricación de soportaciones eléctricas en estructuras metálicas', image: ['https://gbdoqxdldyszmfzqzmuk.supabase.co/storage/v1/object/public/fasercon/images/services/services_soportaciones01.jpg'] },
-    
-    { id: 'm3', title: 'Soportes piping', description: 'Fabricación de soportaciones para líneas de piping en estructuras metálicas', image: ['https://gbdoqxdldyszmfzqzmuk.supabase.co/storage/v1/object/public/fasercon/images/services/services_soportacionespiping01.jpeg'] },
-    
-    { id: 'm4', title: 'Climatización', description: 'Fabricación de ductos de climatización y soportaciones', image: ['https://gbdoqxdldyszmfzqzmuk.supabase.co/storage/v1/object/public/fasercon/images/services/services_climatizacion01.jpeg', 'https://gbdoqxdldyszmfzqzmuk.supabase.co/storage/v1/object/public/fasercon/images/services/services_climatizacion02.jpeg', 'https://gbdoqxdldyszmfzqzmuk.supabase.co/storage/v1/object/public/fasercon/images/services/services_climatizacion03.jpeg'] },
-    
-    { id: 'm5', title: 'Aislación térmica', description: 'Fabricación de chapas para aislación de líneas de piping en acero inoxidable, aluminio y zinc-alum', image: ['https://gbdoqxdldyszmfzqzmuk.supabase.co/storage/v1/object/public/fasercon/images/services/services_aislacion01.jpeg'] },
-    
-    { id: 'm6', title: 'Hojalatería', description: 'Fabricación de hojalatería industrial y terminaciones en aceros prepintados, galvanizados y zinc-alum', image: ['https://gbdoqxdldyszmfzqzmuk.supabase.co/storage/v1/object/public/fasercon/images/services/services_hojalateria01.jpeg', 'https://gbdoqxdldyszmfzqzmuk.supabase.co/storage/v1/object/public/fasercon/images/services/services_hojalateria02.jpeg'] },
-    
-    { id: 'm7', title: 'Soldadura HDPE', description: 'Unión de tuberías y accesorios de polietileno de alta densidad mediante técnicas de termofusión o electrofusión.', image: ['https://gbdoqxdldyszmfzqzmuk.supabase.co/storage/v1/object/public/fasercon/images/services/services_torneria01.jpeg'] },
-    
-    { id: 'm8', title: 'Cañerías', description: 'Fabricación de cañerías y camisas de grandes diámetros', image: ['https://gbdoqxdldyszmfzqzmuk.supabase.co/storage/v1/object/public/fasercon/images/services/services_canierias03.jpeg', 'https://gbdoqxdldyszmfzqzmuk.supabase.co/storage/v1/object/public/fasercon/images/services/services_canierias01.jpeg', 'https://gbdoqxdldyszmfzqzmuk.supabase.co/storage/v1/object/public/fasercon/images/services/services_canierias02.jpeg'] },
-    
-    { id: 'm9', title: 'Cámaras de frio', description: 'Fabricación de cámaras de frío en paneles Isopol', image: ['https://gbdoqxdldyszmfzqzmuk.supabase.co/storage/v1/object/public/fasercon/images/services/services_camarasfrio01.jpeg'] },
-    
-    { id: 'm10', title: 'Oficinas modulares', description: 'Fabricación de oficinas, baños, comedores, salas de cambio y salas de venta modulares', image: ['https://gbdoqxdldyszmfzqzmuk.supabase.co/storage/v1/object/public/fasercon/images/services/services_oficinasinstalaciones01.jpeg', 'https://gbdoqxdldyszmfzqzmuk.supabase.co/storage/v1/object/public/fasercon/images/services/services_oficinasinstalaciones02.jpeg'] },
-    
-    { id: 'm11', title: 'Divisiones de baños', description: 'Fabricación de divisiones de baños y duchas en aluminio, acrílico y melamina', image: ['https://gbdoqxdldyszmfzqzmuk.supabase.co/storage/v1/object/public/fasercon/images/services/services_divisionduchas01.jpeg'] },
-    
-    { id: 'm12', title: 'Pintura industrial', description: 'Servicio de granallado y pintura industrial', image: ['https://gbdoqxdldyszmfzqzmuk.supabase.co/storage/v1/object/public/fasercon/images/services/services_pintura01.jpeg', 'https://gbdoqxdldyszmfzqzmuk.supabase.co/storage/v1/object/public/fasercon/images/services/services_pintura02.jpeg'] },
-    
-    { id: 'm13', title: 'Piezas HDPE', description: 'Fabricación de piezas especiales en HDPE', image: ['https://gbdoqxdldyszmfzqzmuk.supabase.co/storage/v1/object/public/fasercon/images/services/services_hdpe01.jpeg', 'https://gbdoqxdldyszmfzqzmuk.supabase.co/storage/v1/object/public/fasercon/images/services/services_hdpe02.jpeg'] },
-    
-    { id: 'm14', title: 'Montaje', description: 'Montaje de estructuras metálicas', image: ['https://gbdoqxdldyszmfzqzmuk.supabase.co/storage/v1/object/public/fasercon/images/services/services_montaje01.jpeg', 'https://gbdoqxdldyszmfzqzmuk.supabase.co/storage/v1/object/public/fasercon/images/services/services_montaje02.jpeg', 'https://gbdoqxdldyszmfzqzmuk.supabase.co/storage/v1/object/public/fasercon/images/services/services_montaje03.jpeg'] },
-    
-    { id: 'm15', title: 'Montaje de ductos', description: 'Montaje de ductos de climatización', image: ['https://gbdoqxdldyszmfzqzmuk.supabase.co/storage/v1/object/public/fasercon/images/services/services_montajeclima01.jpeg', 'https://gbdoqxdldyszmfzqzmuk.supabase.co/storage/v1/object/public/fasercon/images/services/services_montajeclima02.jpeg', 'https://gbdoqxdldyszmfzqzmuk.supabase.co/storage/v1/object/public/fasercon/images/services/services_montajeclima03.jpeg'] },
-    
-    { id: 'm16', title: 'Revestimientos', description: 'Montaje de revestimientos, cubiertas y terminaciones en hojalatería', image: ['https://gbdoqxdldyszmfzqzmuk.supabase.co/storage/v1/object/public/fasercon/images/services/services_revestimiento01.jpeg', 'https://gbdoqxdldyszmfzqzmuk.supabase.co/storage/v1/object/public/fasercon/images/services/services_estructuras02.jpeg', 'https://gbdoqxdldyszmfzqzmuk.supabase.co/storage/v1/object/public/fasercon/images/services/services_revestimiento02.jpeg'] },
-    
-    { id: 'm17', title: 'Chapas y Aislación piping', description: 'Montaje de chapas y aislación térmica en líneas de piping', image: ['https://gbdoqxdldyszmfzqzmuk.supabase.co/storage/v1/object/public/fasercon/images/services/services_montajeaislacion01.jpeg'] },
+export default function ServicesCarousel({ services = [], showAll = false, variant = 'compact', intro = DEFAULT_INTRO, showTitle = true }: Props) {
+  const [fetchedServices, setFetchedServices] = useState<Service[]>([])
+  const [loadingServices, setLoadingServices] = useState(false)
+  const [servicesError, setServicesError] = useState<string | null>(null)
 
-    { id: 'm18', title: 'Lubricantera', description: 'Fabricación de lubricantera modular', image: ['https://gbdoqxdldyszmfzqzmuk.supabase.co/storage/v1/object/public/fasercon/images/services/services_lubricantera01.webp', 'https://gbdoqxdldyszmfzqzmuk.supabase.co/storage/v1/object/public/fasercon/images/services/services_lubricantera02.webp'] },
+  // live list state used for realtime updates
+  const [liveList, setLiveList] = useState<Service[]>([])
 
-  ]
+  // If no services were passed from server/props, try to fetch from Supabase table `fasercon_services`.
+  useEffect(() => {
+    // only fetch when the caller didn't pass any services
+    if (Array.isArray(services) && services.length > 0) return
 
-  const list = Array.isArray(services) && services.length > 0 ? services : MOCK_SERVICES
-  const displayList = showAll ? list : list.slice(0, 4)
+    let mounted = true
+    const fetchServices = async () => {
+      setLoadingServices(true)
+      try {
+        const { data, error } = await supabase.from('fasercon_services').select('*')
+        if (error) {
+          console.warn('Supabase error fetching fasercon_services:', error)
+          if (mounted) setServicesError(error.message || 'Error fetching services')
+          return
+        }
+
+        if (!data || !Array.isArray(data) || data.length === 0) {
+          if (mounted) setFetchedServices([])
+          return
+        }
+
+        // map rows to local Service type. Be flexible with field names for images.
+        const mapped: Service[] = (data as Record<string, unknown>[]).map((r) => {
+          const imgField = (r['image'] ?? r['images'] ?? r['imagen'] ?? r['images_json'] ?? r['photos'] ?? null) as unknown
+          let imageVal: string | string[] | null = null
+          if (Array.isArray(imgField)) imageVal = imgField as string[]
+          else if (typeof imgField === 'string') imageVal = imgField
+
+          return {
+            id: (r['id'] ?? r['service_id'] ?? r['name'] ?? JSON.stringify(r).slice(0, 8)) as string | number,
+            title: (r['title'] ?? r['name'] ?? r['titulo'] ?? r['servicio'] ?? 'Servicio') as string,
+            description: (typeof r['description'] === 'string' ? r['description'] : (r['desc'] as string | undefined) ?? (r['descripcion'] as string | undefined)) as string | null,
+            image: imageVal ?? null,
+            href: (typeof r['href'] === 'string' ? r['href'] : (r['link'] as string | undefined)) ?? null,
+          }
+        })
+
+        if (mounted) setFetchedServices(mapped)
+      } catch (err: unknown) {
+        console.error('Exception fetching fasercon_services', err)
+        const msg = err instanceof Error ? err.message : String(err)
+        if (mounted) setServicesError(msg)
+      } finally {
+        if (mounted) setLoadingServices(false)
+      }
+    }
+
+    fetchServices()
+
+    return () => { mounted = false }
+  }, [services])
+
+  // final list resolution: prefer explicit prop, then fetched
+  const resolvedList = useMemo(() => {
+    return Array.isArray(services) && services.length > 0
+      ? services
+      : (fetchedServices && fetchedServices.length > 0 ? fetchedServices : [])
+  }, [services, fetchedServices])
+
+  // initialize live list when resolvedList changes
+  useEffect(() => {
+    setLiveList(resolvedList)
+  }, [resolvedList])
+
+  // Helper: simple in-place Fisher-Yates shuffle
+  const shuffleArray = (arr: Service[]) => {
+    const a = [...arr]
+    for (let i = a.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1))
+      const tmp = a[i]
+      a[i] = a[j]
+      a[j] = tmp
+    }
+    return a
+  }
+
+  // Subscribe to realtime changes so the carousel updates live when services are added/updated/deleted
+  useEffect(() => {
+    // Only run on client and if supabase is available
+    if (!supabase || typeof window === 'undefined') return
+
+    const ch = supabase.channel('realtime-fasercon-services')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'fasercon_services' }, (payload: unknown) => {
+        try {
+          const p = payload as Record<string, unknown>
+          const eventType = String(p?.eventType ?? p?.event ?? p?.type ?? '').toUpperCase()
+          const row = (p?.new ?? p?.record ?? p) as Record<string, unknown>
+          // Map row to Service
+          const mapped: Service = {
+            id: String(row['id'] ?? row['service_id'] ?? ''),
+            title: String(row['title'] ?? row['name'] ?? 'Servicio'),
+            description: typeof row['description'] === 'string' ? (row['description'] as string) : (row['desc'] as string) ?? null,
+            image: (typeof row['image_url'] === 'string' ? row['image_url'] : (Array.isArray(row['images']) ? (row['images'] as string[]) : (typeof row['images'] === 'string' ? (row['images'] as string) : null))) as string | string[] | null,
+            href: typeof row['href'] === 'string' ? (row['href'] as string) : null,
+          }
+
+          setLiveList(prev => {
+            let next = [...prev]
+            if (eventType === 'INSERT') {
+              next.push(mapped)
+              next = shuffleArray(next)
+            } else if (eventType === 'UPDATE') {
+              const idx = next.findIndex(s => String(s.id) === String(mapped.id))
+              if (idx !== -1) next[idx] = mapped
+              else next.push(mapped)
+            } else if (eventType === 'DELETE') {
+              next = next.filter(s => String(s.id) !== String(mapped.id))
+            }
+            return next
+          })
+        } catch (err) {
+          console.warn('Error handling realtime payload for services', err)
+        }
+      })
+      .subscribe()
+
+    return () => {
+      try { ch.unsubscribe() } catch { /* ignore */ }
+    }
+  }, [])
+  const displayList = showAll ? liveList : liveList.slice(0, 4)
   const [mounted, setMounted] = useState(false)
   const [activeService, setActiveService] = useState<Service | null>(null)
   const [modalImageIndex, setModalImageIndex] = useState(0)
@@ -199,6 +279,8 @@ export default function ServicesCarousel({ services = DEFAULT_SERVICES, showAll 
           <h2 className="text-3xl font-bold tracking-tight text-gray-900 sm:text-4xl">Nuestros Servicios</h2>
           <p className="mt-6 text-lg leading-8 text-gray-600">{intro}</p>
         </div>
+        {/* Accessibility helpers to avoid unused var lint warnings */}
+        <div className="sr-only">{loadingServices ? 'loading' : ''}{servicesError ? servicesError : ''}</div>
 
         {/* Grid: variant controls rendering. compact = image with overlay text; stacked = image on top, text below inside same card */}
         <div className="mt-12 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -207,7 +289,7 @@ export default function ServicesCarousel({ services = DEFAULT_SERVICES, showAll 
             const baseClasses = `overflow-hidden bg-white rounded-lg shadow-md transform-gpu transition-transform duration-400 ease-in-out border-2 border-transparent transition-colors ${mounted ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4'}`
             const hoverBorderClasses = variant === 'compact'
               ? 'hover:border-gray-300 hover:border-4 focus-within:border-gray-300 focus-within:border-4'
-              : 'border-3 border-gray-300 hover:border-gray-300 focus-within:border-gray-300'
+              : 'border-4 border-gray-300 hover:border-red-600 focus-within:border-gray-300'
 
                 if (variant === 'stacked') {
                 const imagesForCard = parseImages((s as Service).image)

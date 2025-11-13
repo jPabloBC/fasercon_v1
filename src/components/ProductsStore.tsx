@@ -107,12 +107,30 @@ export default function ProductsStore({ products }: Props) {
     }
   }, [])
 
-  const allFeatures = useMemo(() => {
-    const s = new Set<string>()
+  // Agrupa características por tipo detectando prefijos tipo "Material:", "Clase:", "Medida:", etc.
+  const groupedFeatures = useMemo(() => {
+    const groups: Record<string, Set<string>> = {}
     list.forEach((p) => {
-      ;(p.features || []).forEach((f) => { if (f) s.add(String(f)) })
+      (p.features || []).forEach((f) => {
+        if (!f) return
+        // Detecta prefijo tipo "Material: Acero" => tipo: "Material", valor: "Acero"
+        const match = String(f).match(/^([\wáéíóúüñ]+):\s*(.+)$/i)
+        if (match) {
+          const tipo = match[1].trim()
+          const valor = match[2].trim()
+          if (!groups[tipo]) groups[tipo] = new Set()
+          groups[tipo].add(valor)
+        } else {
+          // Si no tiene prefijo, agrupa como "Otros"
+          if (!groups['Otros']) groups['Otros'] = new Set()
+          groups['Otros'].add(f)
+        }
+      })
     })
-    return Array.from(s).sort()
+    return Object.entries(groups).map(([tipo, valores]) => ({
+      tipo,
+      valores: Array.from(valores).sort()
+    })).sort((a, b) => a.tipo.localeCompare(b.tipo))
   }, [list])
 
   // group products by normalized name so size variants are grouped
@@ -217,18 +235,35 @@ export default function ProductsStore({ products }: Props) {
             <div className="rounded-lg bg-gray-50 p-4">
               <h3 className="text-sm font-semibold mb-2">Filtros</h3>
               <div className="text-xs text-gray-600 mb-2">Características</div>
-              <div className="flex flex-col gap-2 max-h-[60vh] overflow-y-auto pr-2">
-                {allFeatures.length === 0 ? (
+              <div className="flex flex-col gap-4 max-h-[60vh] overflow-y-auto pr-2">
+                {groupedFeatures.length === 0 ? (
                   <div className="text-xs text-gray-400">Sin características</div>
                 ) : (
-                  allFeatures.map((f) => (
-                    <label key={f} className="inline-flex items-center gap-2 text-sm">
-                      <input type="checkbox" checked={selectedFeatures.includes(f)} onChange={(e) => {
-                        setPage(1)
-                        setSelectedFeatures(prev => e.target.checked ? [...prev, f] : prev.filter(x => x !== f))
-                      }} />
-                      <span className="truncate">{f}</span>
-                    </label>
+                  groupedFeatures.map(({ tipo, valores }) => (
+                    <details key={tipo} className="bg-white rounded-lg border border-gray-200 shadow-sm group">
+                      <summary className="flex items-center justify-between font-semibold text-xs mb-0 text-gray-700 cursor-pointer select-none py-1 px-2 rounded hover:bg-gray-50 min-h-[32px]">
+                        <span className="truncate">{tipo}</span>
+                        <svg className="h-5 w-5 text-gray-300 group-open:rotate-90 transition-transform" fill="none" viewBox="0 0 20 20" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 8l4 4 4-4" />
+                        </svg>
+                      </summary>
+                      <div className="flex flex-wrap gap-2 py-2 px-2">
+                        {valores.map((v) => {
+                          const count = list.filter(p => (p.features || []).some(f => f.includes(`${tipo}:`) ? f === `${tipo}: ${v}` : f === v)).length
+                          const selected = selectedFeatures.includes(`${tipo}: ${v}`) || selectedFeatures.includes(v)
+                          return (
+                            <label key={v} className={`cursor-pointer px-3 py-1 rounded-full border text-xs font-medium transition ${selected ? 'bg-red-50 border-red-400 text-red-700' : 'bg-gray-50 border-gray-200 text-gray-600 hover:bg-gray-100'}`}>
+                              <input type="checkbox" className="sr-only" checked={selected} onChange={(e) => {
+                                setPage(1)
+                                setSelectedFeatures(prev => e.target.checked ? [...prev, `${tipo}: ${v}`] : prev.filter(x => x !== `${tipo}: ${v}`))
+                              }} />
+                              <span className="truncate">{v}</span>
+                              <span className="ml-1 text-gray-400">({count})</span>
+                            </label>
+                          )
+                        })}
+                      </div>
+                    </details>
                   ))
                 )}
               </div>
@@ -252,19 +287,7 @@ export default function ProductsStore({ products }: Props) {
               <h3 className="text-sm font-semibold mb-2">Filtros</h3>
               <div className="text-xs text-gray-600 mb-2">Características</div>
               <div className="flex flex-col gap-2 max-h-56 overflow-y-auto pr-2">
-                {allFeatures.length === 0 ? (
-                  <div className="text-xs text-gray-400">Sin características</div>
-                ) : (
-                  allFeatures.map((f) => (
-                    <label key={f} className="inline-flex items-center gap-2 text-sm">
-                      <input type="checkbox" checked={selectedFeatures.includes(f)} onChange={(e) => {
-                        setPage(1)
-                        setSelectedFeatures(prev => e.target.checked ? [...prev, f] : prev.filter(x => x !== f))
-                      }} />
-                      <span className="truncate">{f}</span>
-                    </label>
-                  ))
-                )}
+                {/* allFeatures eliminado, solo groupedFeatures */}
               </div>
             </div>
           )}

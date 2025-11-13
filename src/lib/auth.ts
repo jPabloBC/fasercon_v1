@@ -51,11 +51,18 @@ export const authOptions: NextAuthOptions = {
             throw new Error("Contraseña incorrecta");
         }
 
+        // Actualizar last_login al hacer login exitoso
+        await supabase
+          .from('fasercon_users')
+          .update({ last_login: new Date().toISOString() })
+          .eq('id', user.id);
+
         return {
           id: user.id,
           email: user.email,
           name: user.name,
           role: user.role,
+          screens: Array.isArray(user.screens) ? user.screens : [],
         }
       }
     })
@@ -66,10 +73,11 @@ export const authOptions: NextAuthOptions = {
   callbacks: {
     async jwt({ token, user }) {
       if (user) {
-        return {
-          ...token,
-          role: user.role,
-        }
+          return {
+            ...token,
+            role: user.role,
+            screens: Array.isArray(user.screens) ? user.screens : [],
+          }
       }
       return token
     },
@@ -79,6 +87,7 @@ export const authOptions: NextAuthOptions = {
         user: {
           ...session.user,
           role: token.role,
+            screens: Array.isArray(token.screens) ? token.screens : [],
         }
       }
     }

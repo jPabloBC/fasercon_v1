@@ -110,8 +110,8 @@ export default async function Home() {
     });
   // mapped products ready for ProductGallery
   } catch (err) {
-    console.error('Error loading products for home:', err)
-    console.error('Error al consultar productos:', err);
+    // console.error('Error loading products for home:', err)
+    // console.error('Error al consultar productos:', err);
   }
 
   // Eliminar productos duplicados basados en el nombre y luego los ordeno de forma aleatoria
@@ -129,7 +129,7 @@ export default async function Home() {
 
   if (process.env.NODE_ENV !== 'production') {
     // Debug info only during development/build; avoid printing large data in production
-    console.debug('Productos obtenidos para el home:', products);
+    // console.debug('Productos obtenidos para el home:', products);
   }
 
   return (

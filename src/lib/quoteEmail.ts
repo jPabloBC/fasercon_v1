@@ -1,3 +1,47 @@
+// Utilidad para mostrar fracciones amigables
+function toFraction(value: string | number | null | undefined): string {
+  if (value == null || value === '') return '';
+  const num = typeof value === 'string' ? parseFloat(value) : value;
+  if (isNaN(num)) return String(value);
+  if (Number.isInteger(num)) return String(num);
+  const denominators = [2, 3, 4, 8, 16];
+  for (const d of denominators) {
+    const n = Math.round(num * d);
+    if (Math.abs(num - n / d) < 1e-6) {
+      const whole = Math.floor(num);
+      const remainder = n - whole * d;
+      if (whole > 0 && remainder > 0) {
+        return `${whole} ${remainder}/${d}`;
+      } else if (whole > 0 && remainder === 0) {
+        return `${whole}`;
+      } else {
+        return `${n}/${d}`;
+      }
+    }
+  }
+  return num.toFixed(2);
+}
+// Utilidad para mostrar símbolo de unidad amigable en correos
+const unitSymbols: Record<string, string> = {
+  in: '"',
+  ft: "'",
+  m: 'm',
+  cm: 'cm',
+  mm: 'mm',
+  kg: 'kg',
+  g: 'g',
+  ton: 't',
+  l: 'l',
+  unit: '',
+  box: ' caja',
+  pack: ' paquete',
+  roll: ' rollo',
+  other: '',
+};
+function unitSymbol(unit?: string | null) {
+  if (!unit) return '';
+  return unitSymbols[unit] ?? unit;
+}
 export interface QuoteContact {
   rut?: string | null;
   company: string;
@@ -18,14 +62,16 @@ export interface QuoteItem {
 }
 
 export const buildQuoteEmail = ({ contact, items }: { contact: QuoteContact, items: QuoteItem[] }) => {
-  const itemRows = items.map(item => `
-    <tr>
+  const itemRows = items.map(item => {
+    const symbol = unitSymbol(item.measurement_unit);
+    const unitSizeStr = toFraction(item.unit_size);
+    return `<tr>
       <td style="padding:8px;border:1px solid #eee;">${item.name}</td>
       <td style="padding:8px;border:1px solid #eee;">${item.sku || ''}</td>
       <td style="padding:8px;border:1px solid #eee;">${item.qty}</td>
-      <td style="padding:8px;border:1px solid #eee;">${item.unit_size || ''} ${item.measurement_unit || ''}</td>
-    </tr>
-  `).join('');
+      <td style="padding:8px;border:1px solid #eee;">${unitSizeStr}${symbol ? ' ' + symbol : ''}</td>
+    </tr>`;
+  }).join('');
 
   return {
     subject: 'Cotización enviada - Fasercon',
@@ -59,19 +105,25 @@ export const buildQuoteEmail = ({ contact, items }: { contact: QuoteContact, ite
         <p style="font-size:12px;color:#888;text-align:center;">Este correo es automático. No respondas a este mensaje.</p>
       </div>
     `,
-    text: `Cotización Fasercon\n\nEmpresa: ${contact.company}\nEmail: ${contact.email}\nTeléfono: ${contact.phone}\n${contact.rut ? `RUT/Documento: ${contact.rut}\n` : ''}\n\nProductos:\n${items.map(i => `- ${i.name} (${i.qty} ${i.unit_size || ''} ${i.measurement_unit || ''})`).join('\n')}`
+    text: `Cotización Fasercon\n\nEmpresa: ${contact.company}\nEmail: ${contact.email}\nTeléfono: ${contact.phone}\n${contact.rut ? `RUT/Documento: ${contact.rut}\n` : ''}\n\nProductos:\n${items.map(i => {
+      const symbol = unitSymbol(i.measurement_unit);
+      const unitSizeStr = toFraction(i.unit_size);
+      return `- ${i.name} (${i.qty} ${unitSizeStr}${symbol ? ' ' + symbol : ''})`;
+    }).join('\\n')}`
   }
 }
 
 export const buildInternalQuoteEmail = ({ contact, items }: { contact: QuoteContact, items: QuoteItem[] }) => {
-  const itemRows = items.map(item => `
-    <tr>
+  const itemRows = items.map(item => {
+    const symbol = unitSymbol(item.measurement_unit);
+    const unitSizeStr = toFraction(item.unit_size);
+    return `<tr>
       <td style="padding:8px;border:1px solid #eee;">${item.name}</td>
       <td style="padding:8px;border:1px solid #eee;">${item.sku || ''}</td>
       <td style="padding:8px;border:1px solid #eee;">${item.qty}</td>
-      <td style="padding:8px;border:1px solid #eee;">${item.unit_size || ''} ${item.measurement_unit || ''}</td>
-    </tr>
-  `).join('');
+      <td style="padding:8px;border:1px solid #eee;">${unitSizeStr}${symbol ? ' ' + symbol : ''}</td>
+    </tr>`;
+  }).join('');
 
   return {
     subject: 'Nueva Cotización Interna - Fasercon',
@@ -103,6 +155,10 @@ export const buildInternalQuoteEmail = ({ contact, items }: { contact: QuoteCont
         <p style="font-size:12px;color:#888;text-align:center;">Este correo es interno y está destinado únicamente para uso administrativo.</p>
       </div>
     `,
-    text: `Nueva Cotización Interna Fasercon\n\nEmpresa: ${contact.company}\nEmail: ${contact.email}\nTeléfono: ${contact.phone}\n${contact.rut ? `RUT/Documento: ${contact.rut}\n` : ''}\n\nProductos:\n${items.map(i => `- ${i.name} (${i.qty} ${i.unit_size || ''} ${i.measurement_unit || ''})`).join('\n')}`
+    text: `Nueva Cotización Interna Fasercon\n\nEmpresa: ${contact.company}\nEmail: ${contact.email}\nTeléfono: ${contact.phone}\n${contact.rut ? `RUT/Documento: ${contact.rut}\n` : ''}\n\nProductos:\n${items.map(i => {
+      const symbol = unitSymbol(i.measurement_unit);
+      const unitSizeStr = toFraction(i.unit_size);
+      return `- ${i.name} (${i.qty} ${unitSizeStr}${symbol ? ' ' + symbol : ''})`;
+    }).join('\\n')}`
   };
 };

@@ -359,7 +359,7 @@ export default function QuotePage() {
                       }
                     }}
                     placeholder="Ejemplo: 12.345.678-9"
-                    className={`border px-3 py-2 rounded-lg shadow-sm w-full focus:ring-2 focus:ring-red-500 focus:outline-none ${errors.rut ? 'border-red-500' : 'border-gray-300'}`}
+                    className={`border px-3 py-2 rounded-lg shadow-sm w-full bg-white focus:ring-2 focus:ring-red-500 focus:outline-none ${errors.rut ? 'border-red-500' : 'border-gray-300'}`}
                   />
                   {errors.rut && <p className="text-sm text-red-600 mt-1">{errors.rut}</p>}
                 </div>
@@ -374,7 +374,7 @@ export default function QuotePage() {
                       setErrors(prev => ({ ...prev, company: undefined }))
                     }}
                     placeholder="Ejemplo: Fasercon Ltda."
-                    className={`border px-3 py-2 rounded-lg shadow-sm w-full focus:ring-2 focus:ring-red-500 focus:outline-none ${errors.company ? 'border-red-500' : 'border-gray-300'}`}
+                    className={`border px-3 py-2 rounded-lg shadow-sm w-full bg-white focus:ring-2 focus:ring-red-500 focus:outline-none ${errors.company ? 'border-red-500' : 'border-gray-300'}`}
                   />
                   {errors.company && <p className="text-sm text-red-600 mt-1">{errors.company}</p>}
                 </div>
@@ -390,7 +390,7 @@ export default function QuotePage() {
                       setErrors(prev => ({ ...prev, email: undefined }))
                     }}
                     placeholder="Ejemplo: contacto@fasercon.cl"
-                    className={`border px-3 py-2 rounded-lg shadow-sm w-full focus:ring-2 focus:ring-red-500 focus:outline-none ${errors.email ? 'border-red-500' : 'border-gray-300'}`}
+                    className={`border px-3 py-2 rounded-lg shadow-sm w-full bg-white focus:ring-2 focus:ring-red-500 focus:outline-none ${errors.email ? 'border-red-500' : 'border-gray-300'}`}
                   />
                   {errors.email && <p className="text-sm text-red-600 mt-1">{errors.email}</p>}
                 </div>
@@ -407,7 +407,7 @@ export default function QuotePage() {
                       setErrors(prev => ({ ...prev, phone: undefined }))
                     }}
                     placeholder="Ejemplo: +56 9 1234 5678"
-                    className={`border px-3 py-2 rounded-lg shadow-sm w-full focus:ring-2 focus:ring-red-500 focus:outline-none ${errors.phone ? 'border-red-500' : 'border-gray-300'}`}
+                    className={`border px-3 py-2 rounded-lg shadow-sm w-full bg-white focus:ring-2 focus:ring-red-500 focus:outline-none ${errors.phone ? 'border-red-500' : 'border-gray-300'}`}
                   />
                   {errors.phone && <p className="text-sm text-red-600 mt-1">{errors.phone}</p>}
                 </div>

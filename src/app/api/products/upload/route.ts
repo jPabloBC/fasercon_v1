@@ -30,7 +30,11 @@ export async function POST(request: Request) {
       return 'application/octet-stream'
     })()
 
-    const destPath = `images/products/${resolvedFilename}`;
+  // Allow client to request 'products' or 'services' folder. Default to 'products'.
+  const folderReq = (formData.get('folder') as string) || 'products';
+  const allowed = new Set(['products', 'services']);
+  const folder = allowed.has(folderReq) ? folderReq : 'products';
+  const destPath = `images/${folder}/${resolvedFilename}`;
 
     const { error: uploadError } = await supabaseAdmin.storage
       .from('fasercon')
