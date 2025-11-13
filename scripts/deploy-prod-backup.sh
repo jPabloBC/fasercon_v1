@@ -5,6 +5,9 @@ NAME="fasercon-v1"
 TS="$(date +"%Y%m%d-%H%M%S")"
 SCOPE=""  # si no usas team/context, deja vacío: SCOPE=""
 mkdir -p backups
+# Evita agregar archivos sensibles
+echo "token.json" >> .gitignore
+git rm --cached token.json 2>/dev/null || true
 # Git snapshot + tag
 git add -A
 git commit -m "deploy $NAME $TS" || true
