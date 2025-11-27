@@ -29,6 +29,7 @@ type Product = {
   unit_size?: string | null
   measurement_unit?: string | null
   characteristics?: string[]
+  sku?: string | null
 }
 
 // productos cargados desde la API
@@ -39,12 +40,27 @@ export default function QuotePage() {
   const [list, setList] = useState<{id:string|number, name:string, price:number, qty:number, total:number}[]>([]);
   const [, setCurrent] = useState(0);
   const [search, setSearch] = useState('');
-  // modal product state reserved for future use
+  // Estado para productos y productos en orden aleatorio
   const [products, setProducts] = useState<Product[]>(initialProducts)
+  const [randomizedProducts, setRandomizedProducts] = useState<Product[]>([])
   const [selected, setSelected] = useState(null as null | Product);
   const [qty, setQty] = useState(1);
-  const [contact, setContact] = useState({ rut: '', company: '', email: '', phone: '' })
-  const [errors, setErrors] = useState<{ rut?: string; company?: string; email?: string; phone?: string }>({})
+  const [contact, setContact] = useState({
+    rut: '',
+    company: '',
+    email: '',
+    phone: '',
+    address: '',
+    contactName: ''
+  })
+  const [errors, setErrors] = useState<{
+    rut?: string;
+    company?: string;
+    email?: string;
+    phone?: string;
+    address?: string;
+    contactName?: string;
+  }>({})
   const [submitting, setSubmitting] = useState(false)
   const [, setSubmitMessage] = useState<string | null>(null)
   const filtered = Array.isArray(products)
@@ -59,7 +75,6 @@ export default function QuotePage() {
   useEffect(() => { setQty(1); }, [shownProduct?.id]);
 
   // On mount: load saved quote from localStorage and fetch product details
-  // fetch products list on mount
   useEffect(() => {
     let mounted = true
     fetch('/api/products')
@@ -72,6 +87,9 @@ export default function QuotePage() {
             ? data
             : []
         setProducts(arr as Product[])
+        // Generar orden aleatorio solo una vez
+        const randomized = [...arr].sort(() => Math.random() - 0.5)
+        setRandomizedProducts(randomized)
       })
       .catch(err => console.error('Error fetching products for quote page', err))
 
@@ -81,7 +99,6 @@ export default function QuotePage() {
       if (!raw) return
       const saved: StoredQuoteItem[] = JSON.parse(raw)
       if (!Array.isArray(saved) || saved.length === 0) return
-      
       // Añadir productos guardados con sus datos completos a la lista de productos
       const savedProducts: Product[] = saved.map(s => ({
         id: s.id,
@@ -93,7 +110,6 @@ export default function QuotePage() {
         measurement_unit: s.measurement_unit,
         characteristics: s.characteristics
       }))
-      
       setProducts(prev => {
         const merged = [...prev]
         savedProducts.forEach(sp => {
@@ -103,7 +119,16 @@ export default function QuotePage() {
         })
         return merged
       })
-      
+      // También actualizar el orden aleatorio si hay productos guardados
+      setRandomizedProducts(prev => {
+        const merged = [...prev]
+        savedProducts.forEach(sp => {
+          if (!merged.find(p => String(p.id) === String(sp.id))) {
+            merged.push(sp)
+          }
+        })
+        return merged
+      })
       const ids = saved.map(s => s.id)
       fetch('/api/products/batch', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids }) })
         .then(r => r.json())
@@ -126,7 +151,6 @@ export default function QuotePage() {
     } catch (e) {
       console.error('Error reading quote from localStorage', e)
     }
-
     return () => { mounted = false }
   }, [])
 
@@ -199,26 +223,29 @@ export default function QuotePage() {
           </button>
           <div className="flex gap-4 px-8 overflow-x-auto scrollbar-hide">
             {/* El ancho de cada tarjeta se reduce para mostrar más productos a la vez */}
-            {Array.isArray(products) && products.filter((product, index, self) => 
-              index === self.findIndex(p => p.name === product.name)
-            ).map((product) => (
-              <a
-                key={product.id}
-                href={`/products/${product.id}`}
-                className="min-w-[140px] max-w-[140px] flex-shrink-0 border rounded-lg shadow-sm p-2 bg-gray-50 hover:bg-gray-100 transition-colors block"
-              >
-                <div className="w-full h-20 flex items-center justify-center overflow-hidden rounded mb-1 bg-white relative">
-                  <Image
-                    src={String(product.image_url || product.image || '/api/placeholder/400/300')}
-                    alt={product.name}
-                    fill
-                    className="object-cover"
-                    sizes="80px"
-                  />
-                </div>
-                <h3 className="text-xs font-semibold text-gray-900 line-clamp-2">{product.name}</h3>
-              </a>
-            ))}
+            {Array.isArray(randomizedProducts) &&
+              randomizedProducts
+                .filter((product, index, self) => index === self.findIndex(p => p.name === product.name))
+                .map((product) => (
+                  <a
+                    key={product.id}
+                    href={`/products/${product.id}`}
+                    className="min-w-[140px] max-w-[140px] flex-shrink-0 border rounded-lg shadow-sm p-2 bg-gray-50 hover:bg-gray-100 transition-colors block"
+                  >
+                    <div className="w-full h-20 flex items-center justify-center overflow-hidden rounded mb-1 bg-white relative">
+                      <Image
+                        src={product.image_url || '/assets/images/no-image.png'}
+                        alt={product.name}
+                        width={140}
+                        height={80}
+                        style={{ objectFit: 'contain' }}
+                        className="w-full h-full object-contain"
+                        priority={false}
+                      />
+                    </div>
+                    <h3 className="text-xs font-semibold text-gray-900 line-clamp-2">{product.name}</h3>
+                  </a>
+                ))}
       {/* Modal de detalle de producto */}
           </div>
           <button onClick={next} className="absolute right-1 top-1/2 -translate-y-1/2 p-1 bg-gray-100 rounded-full hover:bg-gray-200 z-10">
@@ -228,7 +255,7 @@ export default function QuotePage() {
 
         {/* Buscador de productos */}
         <div className="mb-8 flex justify-center">
-          <input
+          {/* <input
             type="text"
             placeholder="Buscar producto..."
             value={search}
@@ -237,7 +264,8 @@ export default function QuotePage() {
               setSelected(null);
             }}
             className="w-[50vw] max-w-xl px-4 py-2 text-base border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 shadow"
-          />
+          /> */}
+
           {/* Lista de resultados de búsqueda */}
           {search && filtered.length > 0 && (
             <div className="absolute mt-16 bg-white border rounded shadow max-h-48 overflow-y-auto w-full max-w-2xl z-20">
@@ -331,7 +359,7 @@ export default function QuotePage() {
           </div>
           </>
         ) : (
-          <div className="text-center text-gray-500">No se encontró el producto.</div>
+          <div className="text-center text-gray-500"></div>
         )}
 
         {/* Lista de productos añadidos */}
@@ -341,10 +369,51 @@ export default function QuotePage() {
             {/* Wrapping 'Contacto para la cotización' in a gray margin */}
             <div className="bg-gray-100 p-6 rounded-lg border-3 border-gray-300 mb-6">
               <h4 className="text-lg font-semibold mb-2">Contacto para la cotización</h4>
-              <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-2 lg:grid-cols-3 gap-3 justify-center contact-grid">
+                {/* Responsive row arrangement */}
+                {/* Usar grid-rows para controlar filas en diferentes tamaños */}
+                <style jsx>{`
+                  @media (min-width: 1024px) {
+                    .contact-grid {
+                      grid-template-columns: repeat(3, 1fr);
+                    }
+                  }
+                  @media (min-width: 768px) and (max-width: 1023px) {
+                    .contact-grid {
+                      grid-template-columns: repeat(2, 1fr);
+                      justify-items: center;
+                    }
+                    .contact-grid > div {
+                      width: 100%;
+                      max-width: 340px;
+                    }
+                  }
+                  @media (max-width: 767px) {
+                    .contact-grid {
+                      grid-template-columns: 1fr;
+                    }
+                    .contact-grid > div { width: 100%; max-width: none; }
+                  }
+                `}</style>
+                <div className="contact-grid contents">
+                {/* Empresa */}
+                <div>
+                  <label htmlFor="company" className="block text-sm font-medium text-gray-700">Nombre de la empresa</label>
+                  <input
+                    id="company"
+                    value={contact.company}
+                    onChange={(e) => {
+                      setContact(c => ({ ...c, company: e.target.value }))
+                      setErrors(prev => ({ ...prev, company: undefined }))
+                    }}
+                    placeholder="Ejemplo: Fasercon Ltda."
+                    className={`border px-3 py-2 rounded-lg shadow-sm w-full bg-white focus:ring-2 focus:ring-red-500 focus:outline-none ${errors.company ? 'border-red-500' : 'border-gray-300'}`}
+                  />
+                  {errors.company && <p className="text-sm text-red-600 mt-1">{errors.company}</p>}
+                </div>
                 {/* Documento (RUT u otro) */}
                 <div>
-                  <label htmlFor="rut" className="block text-sm font-medium text-gray-700">RUT o documento</label>
+                  <label htmlFor="rut" className="block text-sm font-medium text-gray-700">RUT Empresa</label>
                   <input
                     id="rut"
                     value={contact.rut}
@@ -363,20 +432,39 @@ export default function QuotePage() {
                   />
                   {errors.rut && <p className="text-sm text-red-600 mt-1">{errors.rut}</p>}
                 </div>
-                {/* Empresa */}
+                {/* Dirección Empresa */}
                 <div>
-                  <label htmlFor="company" className="block text-sm font-medium text-gray-700">Nombre de la empresa</label>
+                  <label htmlFor="address" className="block text-sm font-medium text-gray-700">Dirección Empresa</label>
                   <input
-                    id="company"
-                    value={contact.company}
+                    id="address"
+                    value={contact.address}
                     onChange={(e) => {
-                      setContact(c => ({ ...c, company: e.target.value }))
-                      setErrors(prev => ({ ...prev, company: undefined }))
+                      setContact(c => ({ ...c, address: e.target.value }))
+                      setErrors(prev => ({ ...prev, address: undefined }))
+                      localStorage.setItem('fasercon_quotes/company_address', e.target.value)
                     }}
-                    placeholder="Ejemplo: Fasercon Ltda."
-                    className={`border px-3 py-2 rounded-lg shadow-sm w-full bg-white focus:ring-2 focus:ring-red-500 focus:outline-none ${errors.company ? 'border-red-500' : 'border-gray-300'}`}
+                    placeholder="Ejemplo: Av. Providencia 1234, Santiago"
+                    className={`border px-3 py-2 rounded-lg shadow-sm w-full bg-white focus:ring-2 focus:ring-red-500 focus:outline-none ${errors.address ? 'border-red-500' : 'border-gray-300'}`}
                   />
-                  {errors.company && <p className="text-sm text-red-600 mt-1">{errors.company}</p>}
+                  {errors.address && <p className="text-sm text-red-600 mt-1">{errors.address}</p>}
+                </div>
+                {/* Contacto (Nombre de persona de contacto) */}
+                <div>
+                  <label htmlFor="contactName" className="block text-sm font-medium text-gray-700">Contacto</label>
+                  <input
+                    id="contactName"
+                    value={contact.contactName}
+                    onChange={(e) => {
+                      // Capitalizar cada palabra
+                      const capitalized = e.target.value.replace(/\b\w+/g, w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase());
+                      setContact(c => ({ ...c, contactName: capitalized }))
+                      setErrors(prev => ({ ...prev, contactName: undefined }))
+                      localStorage.setItem('fasercon_quotes/contact_name', capitalized)
+                    }}
+                    placeholder="Ejemplo: Juan Pérez"
+                    className={`border px-3 py-2 rounded-lg shadow-sm w-full bg-white focus:ring-2 focus:ring-red-500 focus:outline-none ${errors.contactName ? 'border-red-500' : 'border-gray-300'}`}
+                  />
+                  {errors.contactName && <p className="text-sm text-red-600 mt-1">{errors.contactName}</p>}
                 </div>
                 {/* Correo */}
                 <div>
@@ -410,6 +498,7 @@ export default function QuotePage() {
                     className={`border px-3 py-2 rounded-lg shadow-sm w-full bg-white focus:ring-2 focus:ring-red-500 focus:outline-none ${errors.phone ? 'border-red-500' : 'border-gray-300'}`}
                   />
                   {errors.phone && <p className="text-sm text-red-600 mt-1">{errors.phone}</p>}
+                </div>
                 </div>
               </div>
             </div>
@@ -524,74 +613,124 @@ export default function QuotePage() {
                 setList([])
                 localStorage.removeItem('fasercon_quote')
               }}>Vaciar lista</button>
-              <button className="px-4 py-2 rounded bg-green-600 text-white" disabled={submitting} onClick={async () => {
-                setSubmitting(true)
-                setSubmitMessage(null)
-                try {
-                  // Validaciones
-                  const nextErrors: typeof errors = {}
-                  if (!contact.rut.trim()) nextErrors.rut = 'Documento es requerido'
-                  if (!contact.company.trim()) nextErrors.company = 'Empresa es requerida'
-                  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
-                  if (!contact.email.trim()) nextErrors.email = 'Correo es requerido'
-                  else if (!emailRegex.test(contact.email)) nextErrors.email = 'Correo inválido'
-                  if (!contact.phone.trim()) nextErrors.phone = 'Teléfono es requerido'
-                  else if (!isValidPhoneNumber(contact.phone)) nextErrors.phone = 'Teléfono inválido'
+              <button
+                className="px-4 py-2 rounded bg-green-700 text-white flex items-center justify-center min-w-[160px] relative overflow-hidden"
+                disabled={submitting}
+                onClick={async () => {
+                  setSubmitting(true);
+                  setSubmitMessage(null);
+                  try {
+                    // Validaciones
+                    const nextErrors: typeof errors = {};
+                    if (!contact.rut.trim()) nextErrors.rut = 'Documento es requerido';
+                    if (!contact.company.trim()) nextErrors.company = 'Empresa es requerida';
+                    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+                    if (!contact.email.trim()) nextErrors.email = 'Correo es requerido';
+                    else if (!emailRegex.test(contact.email)) nextErrors.email = 'Correo inválido';
+                    if (!contact.phone.trim()) nextErrors.phone = 'Teléfono es requerido';
+                    else if (!isValidPhoneNumber(contact.phone)) nextErrors.phone = 'Teléfono inválido';
 
-                  if (Object.keys(nextErrors).length > 0) {
-                    setErrors(nextErrors)
-                    throw new Error('Validación')
-                  }
+                    if (Object.keys(nextErrors).length > 0) {
+                      setErrors(nextErrors);
+                      throw new Error('Validación');
+                    }
 
-                  // Formatear RUT si aplica
-                  const rutToSend = validateRut(contact.rut) ? formatRut(contact.rut) : contact.rut
+                    // Formatear RUT si aplica
+                    const rutToSend = validateRut(contact.rut) ? formatRut(contact.rut) : contact.rut;
 
-                  // Construir el payload nuevo con contacto + items detallados
-                  const itemsPayload = list.map(i => {
-                    const prod = Array.isArray(products) ? products.find(p => p.id === i.id) : undefined;
-                    // Convertir image_url a string si es un arreglo
-                    const imageUrl = prod?.image_url 
-                      ? (Array.isArray(prod.image_url) ? prod.image_url[0] : prod.image_url)
-                      : '';
-                    return {
-                      product_id: i.id,
-                      name: i.name,
-                      image_url: imageUrl,
-                      unit_size: prod?.unit_size ?? '',
-                      measurement_unit: prod?.measurement_unit ?? '',
-                      qty: i.qty,
-                      price: i.price ?? 0,
-                      characteristics: prod?.characteristics ?? [],
+                    // Construir el payload nuevo con contacto + items detallados
+                    const itemsPayload = list.map(i => {
+                      const prod = Array.isArray(products) ? products.find(p => p.id === i.id) : undefined;
+                      const imageUrl = prod?.image_url
+                        ? (Array.isArray(prod.image_url) ? prod.image_url[0] : prod.image_url)
+                        : '';
+                      return {
+                        product_id: i.id,
+                        name: i.name,
+                        image_url: imageUrl,
+                        unit_size: prod?.unit_size ?? '',
+                        measurement_unit: prod?.measurement_unit ?? '',
+                        qty: i.qty,
+                        price: i.price ?? 0,
+                        characteristics: prod?.characteristics ?? [],
+                        sku: prod?.sku ?? '',
+                      };
+                    });
+
+                    // Guardar los nuevos campos en localStorage
+                    localStorage.setItem('fasercon_quotes/company_address', contact.address || '');
+                    localStorage.setItem('fasercon_quotes/contact_name', contact.contactName || '');
+
+                    const payload = {
+                      contact: {
+                        rut: rutToSend,
+                        company: contact.company.trim(),
+                        email: contact.email.trim(),
+                        phone: contact.phone,
+                        company_address: contact.address || '',
+                        contact_name: contact.contactName || '',
+                      },
+                      items: itemsPayload,
                     };
-                  });
+                    const res = await fetch('/api/quotes', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify(payload),
+                    });
+                    const json = await res.json();
+                    if (res.ok) {
+                      setSubmitMessage('Cotización enviada correctamente');
+                      alert('¡La solicitud de cotización se envió correctamente!');
 
-                  const payload = {
-                    contact: {
-                      rut: rutToSend,
-                      company: contact.company.trim(),
-                      email: contact.email.trim(),
-                      phone: contact.phone,
-                    },
-                    items: itemsPayload,
-                  };
-                  const res = await fetch('/api/quotes', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
-                  const json = await res.json()
-                  if (res.ok) {
-                    setSubmitMessage('Cotización enviada correctamente')
-                    alert('¡La solicitud de cotización se envió correctamente!');
-                    // clear
-                    setList([])
-                    localStorage.removeItem('fasercon_quote')
-                    window.dispatchEvent(new Event('fasercon_quote_updated'))
-                  } else {
-                    setSubmitMessage(json?.error || json?.message || 'Error al enviar')
+                      // Generar PDF y enviar correo usando el correlative asignado por el servidor
+                      try {
+                        const correlative = json?.correlative || null;
+                        const quoteNumber = json?.quote_number || null;
+                        if (correlative || quoteNumber) {
+                          await fetch('/api/generate-quote-pdf', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                              correlative,
+                              quote_number: quoteNumber,
+                              contact: payload.contact,
+                              items: itemsPayload,
+                              createdAt: new Date().toISOString(),
+                              sendEmail: true,
+                            }),
+                          });
+                        } else {
+                          console.warn('No correlative or quote_number returned from save; email not sent automatically.');
+                        }
+                      } catch (e) {
+                        console.error('Error generating/sending PDF after save:', e);
+                      }
+
+                      setList([]);
+                      localStorage.removeItem('fasercon_quote');
+                      window.dispatchEvent(new Event('fasercon_quote_updated'));
+                    } else {
+                      setSubmitMessage(json?.error || json?.message || 'Error al enviar');
+                    }
+                  } catch {
+                    setSubmitMessage('Error al enviar cotización');
+                  } finally {
+                    setSubmitting(false);
                   }
-                } catch {
-                  setSubmitMessage('Error al enviar cotización')
-                } finally {
-                  setSubmitting(false)
-                }
-              }}>Enviar cotización</button>
+                }}
+              >
+                {submitting ? (
+                  <span className="flex items-center gap-2">
+                    <span className="relative flex h-5 w-5">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-white opacity-50"></span>
+                      <span className="relative inline-flex rounded-full h-5 w-5 bg-white"></span>
+                    </span>
+                    Procesando...
+                  </span>
+                ) : (
+                  'Solicitar cotización'
+                )}
+              </button>
             </div>
           </div>
         )}

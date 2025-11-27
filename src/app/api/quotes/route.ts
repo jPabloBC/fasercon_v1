@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { supabase, supabaseAdmin } from '@/lib/supabase'
-import transporter from '@/lib/email'
-import { buildQuoteEmail } from '@/lib/quoteEmail'
+// Email sending is handled by `/api/generate-quote-pdf` to avoid duplicate sends
 
 // Legacy calculator schema (kept for compatibility)
 const quoteSchema = z.object({
@@ -25,6 +24,8 @@ const itemSchema = z.object({
   measurement_unit: z.string().optional().nullable(),
   qty: z.number().min(1),
   price: z.number().optional().nullable(),
+  update_price: z.number().optional().nullable(), // Agregado para evitar errores de tipo
+  discount: z.number().optional().nullable(), // Added discount property
   characteristics: z.array(z.string()).optional(),
   sku: z.string().optional(),
 })
@@ -36,6 +37,8 @@ const preSaleSchema = z.object({
     email: z.string().email('Email inválido'),
     phone: z.string().min(7, 'El teléfono es inválido'),
     document: z.string().optional().nullable(),
+    company_address: z.string().min(1, 'La dirección de la empresa es requerida'),
+    contact_name: z.string().min(1, 'El nombre de contacto es requerido'),
   }),
   items: z.array(itemSchema).min(1, 'Debes agregar al menos un producto'),
 })
@@ -66,9 +69,8 @@ export async function GET() {
 
     // Obtener todos los items asociados a las cotizaciones
     const quoteIds = (quotes || []).map(q => q.id)
-    console.log('[DEBUG] Quote IDs:', quoteIds);
-  let itemsByQuote: Record<string, unknown[]> = {}
-  let productsById: Record<string, unknown> = {}
+    let itemsByQuote: Record<string, unknown[]> = {}
+    let productsById: Record<string, unknown> = {}
     if (quoteIds.length > 0) {
       const { data: items, error: itemsError } = await supabase
         .from('fasercon_quote_items')
@@ -145,49 +147,284 @@ export async function POST(request: NextRequest) {
     const body = await request.json()
 
     console.log('Incoming payload:', body)
+    const capitalizeName = (s: string) => {
+      return String(s || '')
+        .split(' ')
+        .filter(Boolean)
+        .map((w) => w[0]?.toUpperCase() + w.slice(1).toLowerCase())
+        .join(' ')
+    }
 
-    // Branch 1: New pre-sale schema with items
-    if (body && body.contact && Array.isArray(body.items)) {
-      const { contact, items } = preSaleSchema.parse(body)
+    // Helper to compute next sequential correlative (0001, 0002, ...)
+    async function computeNextCorrelative() {
+      let correlativeNext = '0001';
+      try {
+        const { data: quotesCorrelatives } = await supabase
+          .from('fasercon_quotes')
+          .select('correlative');
+        const { data: versionsCorrelatives } = await supabase
+          .from('fasercon_quote_versions')
+          .select('correlative');
+        const all = [] as Array<string | null | undefined>;
+        if (Array.isArray(quotesCorrelatives)) all.push(...quotesCorrelatives.map((r: { correlative: string }) => r.correlative));
+        if (Array.isArray(versionsCorrelatives)) all.push(...versionsCorrelatives.map((r: { correlative: string }) => r.correlative));
+        let maxNum = 0;
+        // Only consider existing correlative values that are exactly 4 digits (e.g. 0001)
+        for (const s of all) {
+          if (!s) continue;
+          const str = String(s).trim();
+          if (/^\d{4}$/.test(str)) {
+            const n = parseInt(str, 10);
+            if (!isNaN(n) && n > maxNum) maxNum = n;
+          }
+        }
+        correlativeNext = String(maxNum + 1).padStart(4, '0');
+      } catch (err) {
+        console.warn('Failed to compute next correlative, defaulting to 0001', err);
+      }
+      return correlativeNext;
+    }
 
-      console.log('Parsed contact:', contact)
-      console.log('Parsed items:', items)
+    // Branch DRAFT: allow saving incomplete data as a draft (relaxed validation)
+    if (body && body.draft) {
+      // Draft schema: make contact/items optional and permissive
+      const draftContactSchema = z.object({
+        rut: z.string().optional().nullable(),
+        company: z.string().optional().nullable(),
+        email: z.string().optional().nullable(),
+        phone: z.string().optional().nullable(),
+        document: z.string().optional().nullable(),
+        company_address: z.string().optional().nullable(),
+        contact_name: z.string().optional().nullable(),
+      }).optional();
 
-      // Insert base quote with minimal required legacy fields (defaults)
-      // Generar quote_number único: FC-{AÑO}{MES}{DIA}-{NÚMERO ALEATORIO}
-      const now = new Date();
-      const quote_number = `FC-${now.getFullYear()}${String(now.getMonth()+1).padStart(2,'0')}${String(now.getDate()).padStart(2,'0')}-${Math.floor(1000 + Math.random() * 9000)}`;
+      const draftItemSchema = z.object({
+        product_id: z.union([z.string(), z.number()]).optional().nullable(),
+        name: z.string().optional().nullable(),
+        image_url: z.string().optional().nullable(),
+        unit_size: z.string().optional().nullable(),
+        measurement_unit: z.string().optional().nullable(),
+        qty: z.number().min(0).optional().nullable(),
+        price: z.number().optional().nullable(),
+        update_price: z.number().optional().nullable(),
+        discount: z.number().optional().nullable(),
+        characteristics: z.array(z.string()).optional().nullable(),
+        sku: z.string().optional().nullable(),
+      }).passthrough();
 
-      const { data: quote, error: qErr } = await supabase
+      const draftSchema = z.object({
+        contact: draftContactSchema,
+        items: z.array(draftItemSchema).optional(),
+        parent_quote_id: z.any().optional(),
+        parent_correlative: z.any().optional(),
+      });
+
+      const parsed = draftSchema.parse(body);
+      const contact = parsed.contact || {};
+      const items = Array.isArray(parsed.items) ? parsed.items : [];
+
+      // For drafts we don't assign a sequential quote_number to avoid unique constraint conflicts.
+      const quote_number = null;
+
+      // Insert quote as pending but mark as draft in admin_notes (DB does not accept 'DRAFT' status)
+      const adminNotesDraft = JSON.stringify({ draft: true, savedAt: new Date().toISOString() });
+      const { data: inserted, error: qErr } = await supabase
         .from('fasercon_quotes')
         .insert([
           {
-            name: contact.company,
-            email: contact.email,
-            phone: contact.phone,
+            name: contact.company || contact.contact_name || null,
+            email: contact.email || null,
+            phone: contact.phone || null,
             width: 1,
             length: 1,
             area: 1,
             material_type: 'PRE-SALE',
             estimated_price: 0,
             status: 'PENDING',
+            admin_notes: adminNotesDraft,
             quote_number,
+            document: contact.rut || contact.document || null,
+            company_address: contact.company_address || null,
+            contact_name: contact.contact_name || null,
           },
         ])
         .select()
-        .single()
+        .single();
 
-      if (qErr || !quote) {
-        console.error('Error insertando cotización:', qErr)
-        return NextResponse.json(
-          { message: 'Error al guardar la cotización' },
-          { status: 500 }
-        )
+      if (qErr || !inserted) {
+        console.error('Error insertando borrador de cotización:', qErr);
+        // Expose error details only in non-production to aid debugging
+        if (process.env.NODE_ENV !== 'production') {
+          return NextResponse.json({ message: 'Error al guardar el borrador', error: qErr }, { status: 500 });
+        }
+        return NextResponse.json({ message: 'Error al guardar el borrador' }, { status: 500 });
       }
 
-      // Try to insert items in fasercon_quote_items (if table exists)
-      let itemsSaved = 0
+      let itemsSaved = 0;
       if (items.length > 0) {
+        console.log('[DEBUG] Draft items payload (raw):', items);
+        const rows = items.map(it => ({
+          quote_id: inserted.id,
+          product_id: it.product_id ?? null,
+          name: it.name ?? null,
+          image_url: it.image_url ?? null,
+          unit_size: it.unit_size ?? null,
+          measurement_unit: it.measurement_unit ?? null,
+          qty: Number(it.qty) || 0,
+          price: Number(it.price) || 0,
+          update_price: typeof it.update_price === 'number' ? it.update_price : (it.update_price != null ? Number(it.update_price) : (typeof it.price === 'number' ? it.price : 0)),
+          discount: typeof it.discount === 'number' ? it.discount : (it.discount != null ? Number(it.discount) : 0),
+          company: contact.company || null,
+          email: contact.email || null,
+          phone: contact.phone || null,
+          document: contact.rut || contact.document || null,
+          company_address: contact.company_address || null,
+          contact_name: contact.contact_name || null,
+        }));
+        console.log('[DEBUG] Draft rows to insert:', rows);
+
+        try {
+          const { data: insertedItems, error: itemsErr, count } = await supabase
+            .from('fasercon_quote_items')
+            .insert(rows, { count: 'exact' });
+          if (itemsErr) {
+            console.error('Error guardando items de borrador:', itemsErr, 'rows:', rows);
+            // In development expose the error details to the client to help debugging
+            if (process.env.NODE_ENV !== 'production') {
+              return NextResponse.json({ message: 'Borrador guardado, pero error insertando items', id: inserted.id, itemsSaved: 0, itemsError: itemsErr }, { status: 201 });
+            }
+          } else {
+            itemsSaved = Array.isArray(insertedItems)
+              ? (insertedItems as any[]).length
+              : (typeof count === 'number' ? count : rows.length);
+          }
+        } catch (insEx) {
+          console.error('Excepción al insertar items de borrador:', insEx, 'rows:', rows);
+          if (process.env.NODE_ENV !== 'production') {
+            return NextResponse.json({ message: 'Excepción al insertar items de borrador', id: inserted.id, itemsSaved: 0, exception: String(insEx) }, { status: 500 });
+          }
+        }
+      }
+
+      return NextResponse.json({ message: 'Borrador guardado.', id: inserted.id, itemsSaved, quote_number: inserted.quote_number ?? null }, { status: 201 });
+    }
+
+    // Branch 1: New pre-sale schema with items
+    if (body && body.contact && Array.isArray(body.items)) {
+      const { contact, items } = preSaleSchema.parse(body)
+      // Normalize contact name capitalization
+      contact.contact_name = capitalizeName(contact.contact_name || '')
+
+      console.log('Parsed contact:', contact)
+      console.log('Parsed items:', items)
+
+      // Crear o actualizar la cotización principal. Si el cliente envía
+      // `parent_quote_id` or `parent_correlative` indicates a resend
+      // and the existing row will be updated (saving a new version in the versions table).
+      const correlativeNext = await computeNextCorrelative();
+      const quote_number = correlativeNext;
+
+      let quote: Record<string, unknown> | null = null;
+      let isNew = false;
+
+      // Detect resend/update if parent_quote_id or parent_correlative is present
+      const parentId = (body.parent_quote_id as string) || null;
+      const parentCorrelative = (body.parent_correlative as string) || null;
+
+      if (parentId || parentCorrelative) {
+        // Buscar la cotización existente
+        const lookup = parentId
+          ? await supabase.from('fasercon_quotes').select('*').eq('id', parentId).single()
+          : await supabase.from('fasercon_quotes').select('*').eq('correlative', parentCorrelative).single();
+        if (!lookup.data) {
+          console.error('Parent quote not found for creating version', parentId || parentCorrelative);
+          return NextResponse.json({ message: 'Parent quote not found' }, { status: 404 });
+        }
+        const existing = lookup.data as Record<string, unknown>;
+        // Actualizar la cotización principal con los nuevos datos
+        const newStatus = 'PENDING'
+        const adminNotes = body.draft ? JSON.stringify({ draft: true, savedAt: new Date().toISOString() }) : null;
+        const { data: updated, error: updErr } = await supabase
+          .from('fasercon_quotes')
+          .update({
+            name: contact.company,
+            email: contact.email,
+            phone: contact.phone,
+            document: contact.rut || contact.document || null,
+            company_address: contact.company_address || null,
+            contact_name: contact.contact_name || null,
+            quote_number: quote_number,
+            status: newStatus,
+            admin_notes: adminNotes,
+          })
+          .eq('id', existing.id)
+          .select()
+          .single();
+        if (updErr || !updated) {
+          console.error('Error actualizando cotización existente:', updErr);
+          return NextResponse.json({ message: 'Error al actualizar la cotización' }, { status: 500 });
+        }
+        quote = updated;
+
+        // Cambiar el estado a 'SENT' si es la primera cotización
+        if (quote && !quote.correlative) {
+          const nextCorrelative = await computeNextCorrelative();
+
+          const { data: updatedQuote, error: updateErr } = await supabase
+            .from('fasercon_quotes')
+            .update({
+              correlative: nextCorrelative,
+              status: 'SENT', // Cambiar el estado a SENT
+            })
+            .eq('id', quote.id)
+            .select()
+            .single();
+
+          if (updateErr || !updatedQuote) {
+            console.error('Error actualizando la primera cotización:', updateErr);
+            return NextResponse.json({ message: 'Error al enviar la primera cotización' }, { status: 500 });
+          }
+
+          console.log('Primera cotización enviada con correlativo:', nextCorrelative);
+          quote = updatedQuote;
+        }
+      } else {
+        // Insertar nueva cotización
+        const newStatus = 'PENDING'
+        const adminNotes = body.draft ? JSON.stringify({ draft: true, savedAt: new Date().toISOString() }) : null;
+        const { data: inserted, error: qErr } = await supabase
+          .from('fasercon_quotes')
+          .insert([
+            {
+              name: contact.company,
+              email: contact.email,
+              phone: contact.phone,
+              width: 1,
+              length: 1,
+              area: 1,
+              material_type: 'PRE-SALE',
+              estimated_price: 0,
+              status: newStatus,
+              admin_notes: adminNotes,
+              quote_number: quote_number,
+              document: contact.rut || contact.document || null,
+              company_address: contact.company_address || null,
+              contact_name: contact.contact_name || null,
+            }
+          ])
+          .select()
+          .single();
+        if (qErr || !inserted) {
+          console.error('Error insertando cotización:', qErr)
+          return NextResponse.json({ message: 'Error al guardar la cotización' }, { status: 500 })
+        }
+        quote = inserted;
+        isNew = true;
+      }
+
+      // Try to insert items in fasercon_quote_items only when creating a new quote
+      let itemsSaved = 0
+      if (isNew && items.length > 0 && quote) {
         const rows = items.map(it => ({
           quote_id: quote.id,
           product_id: it.product_id,
@@ -197,23 +434,22 @@ export async function POST(request: NextRequest) {
           measurement_unit: it.measurement_unit ?? null,
           qty: it.qty,
           price: it.price ?? 0,
+          update_price: typeof it.update_price === 'number' ? it.update_price : (it.update_price != null ? Number(it.update_price) : (typeof it.price === 'number' ? it.price : 0)),
+          discount: typeof it.discount === 'number' ? it.discount : (it.discount != null ? Number(it.discount) : 0),
           // NO guardamos characteristics aquí - se obtienen desde fasercon_products
           company: contact.company, // Add company data
           email: contact.email,     // Add email data
           phone: contact.phone,      // Add phone data
           document: contact.rut || contact.document, // Ensure RUT/document is added
+          company_address: contact.company_address, // Uniformar: dirección en cada ítem
+          contact_name: contact.contact_name, // Uniformar: nombre contacto en cada ítem
         }))
-        console.log('Using supabaseAdmin for insertion:', !!process.env.SUPABASE_SERVICE_ROLE_KEY);
-        
-        if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
-          console.error('Service role key is missing. Cannot proceed with insertion.');
-          return NextResponse.json(
-            { message: 'Error interno del servidor: falta la clave de rol de servicio.' },
-            { status: 500 }
-          );
-        }
+        console.log('[DEBUG] New quote rows to insert:', rows);
+        // Determine which client to use for items insertion.
+        // For drafts we can use the regular supabase client; for final inserts prefer supabaseAdmin.
+        const clientForItems = body.draft ? supabase : supabaseAdmin;
 
-        // Ensure quote_id is optional for fasercon_quote_items
+        // Ensure quote_id is present for fasercon_quote_items
         if (!quote.id) {
           console.error('Quote ID is missing. Cannot insert items.');
           return NextResponse.json(
@@ -222,17 +458,25 @@ export async function POST(request: NextRequest) {
           );
         }
 
-        const { error: itemsErr, count } = await supabaseAdmin
-          .from('fasercon_quote_items')
-          .insert(rows, { count: 'exact' })
+        try {
+          const { error: itemsErr, count } = await clientForItems
+            .from('fasercon_quote_items')
+            .insert(rows, { count: 'exact' })
 
-        if (itemsErr) {
-          console.error('Error guardando items de cotización:', itemsErr)
-        } else if (typeof count === 'number') {
-          itemsSaved = count
-        } else {
-          itemsSaved = rows.length
+          if (itemsErr) {
+            console.error('Error guardando items de cotización:', itemsErr)
+          } else if (typeof count === 'number') {
+            itemsSaved = count
+          } else {
+            itemsSaved = rows.length
+          }
+        } catch (insertEx) {
+          console.error('Excepción al insertar items:', insertEx)
         }
+      } else if (!isNew) {
+        // When updating/resending an existing quote we intentionally DO NOT insert items
+        // to avoid duplicating rows in `fasercon_quote_items`. Existing items remain as-is.
+        console.log('Skipping items insertion for updated quote (avoiding duplicates).')
       }
 
       // Enrich items with details from the database
@@ -264,79 +508,142 @@ export async function POST(request: NextRequest) {
         };
       });
 
-      // Generar PDF y enviar email al cliente y a Fasercon
-      let emailSuccess = true;
-      try {
-        const emailData = buildQuoteEmail({ contact, items: enrichedItems });
-        const { quote_number, created_at } = quote;
-        // Importar aquí para evitar problemas SSR
-        const { generateQuotePDF } = await import('@/lib/quotePdf');
-        const pdfBuffer = await generateQuotePDF({
-          correlativo: quote_number,
+      // Insertar un registro de versión en `fasercon_quote_versions`.
+      let createdVersion: number | null = null;
+      if (quote) {
+        try {
+          // Determinar el siguiente número de versión
+          let nextVersion = 1;
+          const { data: lastVersionRow, error: lastErr } = await supabase
+            .from('fasercon_quote_versions')
+            .select('version')
+            .eq('quote_id', quote.id)
+          .order('version', { ascending: false })
+          .limit(1)
+          .single();
+        if (!lastErr && lastVersionRow && typeof lastVersionRow.version === 'number') {
+          nextVersion = lastVersionRow.version + 1;
+        } else if (isNew) {
+          nextVersion = 1;
+        }
+
+        const payload = {
           contact,
           items: enrichedItems,
-          createdAt: created_at,
-        });
-        // Cliente
-        await transporter.sendMail({
-          from: {
-            name: 'Fasercon Cotizaciones',
-            address: process.env.EMAIL_USER || 'gerencia@ingenit.cl',
+          meta: {
+            itemsSaved,
+            isNew,
+            generatedAt: new Date().toISOString(),
           },
-          to: contact.email,
-          subject: emailData.subject,
-          html: emailData.html,
-          text: emailData.text,
-          attachments: [
-            {
-              filename: `Cotizacion-${quote_number}.pdf`,
-              content: Buffer.from(pdfBuffer),
-              contentType: 'application/pdf',
-            },
-          ],
-        });
-        console.log(`[EMAIL] Cotización enviada a cliente: ${contact.email}`);
-        // Interno
-        await transporter.sendMail({
-          from: {
-            name: 'Fasercon Cotizaciones',
-            address: process.env.EMAIL_USER || 'gerencia@ingenit.cl',
-          },
-          to: 'jpbernal@fasercon.cl',
-          subject: `Copia Interna: ${emailData.subject}`,
-          html: `
-            <div style="font-family:Arial,sans-serif;max-width:600px;margin:auto;">
-              <h2 style="background:#2d3748;color:white;padding:16px 0;text-align:center;">Copia Interna - Cotización Fasercon</h2>
-              <p>Se ha generado una nueva cotización con los siguientes detalles:</p>
-              <p><b>Cliente:</b> ${contact.company}</p>
-              <p><b>Email:</b> ${contact.email}</p>
-              <p><b>Teléfono:</b> ${contact.phone}</p>
-              <hr style="margin:24px 0;border:none;border-top:1px solid #eee;">
-              <p style="font-size:12px;color:#888;text-align:center;">Este correo es interno y está destinado únicamente para uso administrativo.</p>
-            </div>
-          `,
-          text: `Copia Interna - Cotización Fasercon\n\nCliente: ${contact.company}\nEmail: ${contact.email}\nTeléfono: ${contact.phone}\n\nEste correo es interno y está destinado únicamente para uso administrativo.`,
-          attachments: [
-            {
-              filename: `Cotizacion-${quote_number}.pdf`,
-              content: Buffer.from(pdfBuffer),
-              contentType: 'application/pdf',
-            },
-          ],
-        });
-        console.log('[EMAIL] Cotización enviada a jpbernal@fasercon.cl');
-      } catch (err) {
-        emailSuccess = false;
-        console.error('[EMAIL ERROR] No se pudo enviar la cotización:', err);
+        };
+
+        if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
+          console.warn('SUPABASE_SERVICE_ROLE_KEY not present; skipping version insert.');
+        } else {
+          const { error: verErr } = await supabaseAdmin
+            .from('fasercon_quote_versions')
+            .insert([
+              {
+                    quote_id: quote.id,
+                    correlative: quote.quote_number,
+                    payload: payload,
+                    version: nextVersion,
+                    created_by: contact.email || null,
+                  },
+            ]);
+          if (verErr) {
+            console.error('Error insertando versión de cotización:', verErr);
+          } else {
+            createdVersion = nextVersion;
+            console.log('Versión de cotización guardada:', quote.id, 'v' + nextVersion);
+          }
+        }
+        } catch (vErr) {
+          console.error('Excepción al crear versión de cotización:', vErr);
+        }
       }
+
+      // Crear una versión incluso para la primera cotización
+      if (isNew && quote) {
+        const payload = {
+          contact,
+          items: enrichedItems,
+          meta: {
+            itemsSaved,
+            isNew,
+            generatedAt: new Date().toISOString(),
+          },
+        };
+
+        const { error: versionErr } = await supabaseAdmin
+          .from('fasercon_quote_versions')
+          .insert([
+            {
+              quote_id: quote.id,
+              correlative: quote.quote_number,
+              payload: payload,
+              version: 1,
+              created_by: contact.email || null,
+              created_at: new Date().toISOString(),
+            },
+          ]);
+
+        if (versionErr) {
+          console.error('Error creando la versión inicial de la cotización:', versionErr);
+        } else {
+          console.log('Versión inicial creada para la cotización:', quote.id);
+        }
+      }
+
+      // Manejar versiones en fasercon_quote_versions
+      if (!isNew && body.changes && quote) {
+        const { discounts, prices } = body.changes;
+        const { data: versions, error: versionErr } = await supabase
+          .from('fasercon_quote_versions')
+          .select('id')
+          .eq('quote_id', quote.id);
+
+        if (versionErr) {
+          console.error('Error obteniendo versiones existentes:', versionErr);
+          return NextResponse.json({ message: 'Error al manejar versiones' }, { status: 500 });
+        }
+
+        if (versions.length >= 5) {
+          return NextResponse.json({ message: 'Límite de versiones alcanzado' }, { status: 400 });
+        }
+
+        const { error: insertErr } = await supabase
+          .from('fasercon_quote_versions')
+          .insert({
+            quote_id: quote.id,
+            discounts,
+            prices,
+            created_at: new Date().toISOString(),
+          })
+          .select()
+          .single();
+
+        if (insertErr) {
+          console.error('Error insertando nueva versión:', insertErr);
+          return NextResponse.json({ message: 'Error al guardar la nueva versión' }, { status: 500 });
+        }
+      }
+
+      // Email sending intentionally omitted here to avoid duplicate messages.
+      // The front-end should call `/api/generate-quote-pdf` with `sendEmail: true`
+      // when it wants to actually send the quote to the client.
+      const emailSuccess: boolean | null = null;
       return NextResponse.json(
         {
           message: emailSuccess
             ? 'Cotización enviada exitosamente'
-            : 'Cotización guardada, pero hubo un error al enviar el correo. Revisa los logs.',
-          id: quote.id,
+            : 'Cotización guardada.',
+          id: quote?.id,
           itemsSaved,
           emailSuccess,
+          correlative: quote?.quote_number,
+          quote_number: quote?.quote_number,
+          version: createdVersion,
         },
         { status: 201 }
       )
@@ -344,6 +651,10 @@ export async function POST(request: NextRequest) {
 
     // Branch 2: Legacy calculator payload
     const validatedData = quoteSchema.parse(body)
+
+    // Generar correlativo para el payload legacy también
+    const legacyCorrelative = await computeNextCorrelative();
+    const quote_number = legacyCorrelative;
 
     const { data: quote, error } = await supabase
       .from('fasercon_quotes')
@@ -358,6 +669,7 @@ export async function POST(request: NextRequest) {
           material_type: validatedData.materialType,
           estimated_price: validatedData.estimatedPrice,
           status: 'PENDING',
+          quote_number,
         },
       ])
       .select()

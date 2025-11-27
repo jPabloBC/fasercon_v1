@@ -459,7 +459,8 @@ export default function ProductDetail({ product, variants = [], onClose }: Props
                   characteristics: current.characteristics
                 })
                 setMessage(`${qty} × ${current.name} agregado${qty > 1 ? 's' : ''} al cotizador`)
-                setTimeout(() => setMessage(null), 2500)
+                // Mostrar mensaje un poco más tiempo (4.5s) para que el usuario lo vea
+                setTimeout(() => setMessage(null), 4500)
               }}
               className="w-full sm:w-auto sm:ml-auto rounded-md bg-red-600 px-6 py-2 text-base text-white font-bold shadow-md hover:bg-red-700 transition-all"
             >
@@ -473,18 +474,21 @@ export default function ProductDetail({ product, variants = [], onClose }: Props
         <div
           role="status"
           aria-live="polite"
-          className="fixed left-1/2 bottom-8 z-50 -translate-x-1/2 rounded-md bg-green-50 px-6 py-3 text-base text-green-700 shadow-lg border border-green-200 animate-fade-in"
+          className="fixed left-1/2 top-27 z-50 -translate-x-1/2 rounded-sm bg-red/70 px-6 py-3 text-base shadow-lg animate-fade-in-out border-1 border-red-500"
+          style={{ minWidth: 240, color: 'rgba(55,65,81,0.7)' }}
         >
           {message}
         </div>
       ) : null}
       <style jsx>{`
-        @keyframes fade-in {
-          from { opacity: 0; transform: translateY(16px); }
-          to { opacity: 1; transform: translateY(0); }
+        @keyframes fade-in-out {
+          0% { opacity: 0; transform: translateY(-8px); }
+          10% { opacity: 1; transform: translateY(0); }
+          90% { opacity: 1; transform: translateY(0); }
+          100% { opacity: 0; transform: translateY(-8px); }
         }
-        .animate-fade-in {
-          animation: fade-in 0.25s ease;
+        .animate-fade-in-out {
+          animation: fade-in-out 4.5s ease forwards;
         }
       `}</style>
     </div>

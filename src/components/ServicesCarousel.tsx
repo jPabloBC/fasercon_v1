@@ -157,6 +157,7 @@ export default function ServicesCarousel({ services = [], showAll = false, varia
   const [mounted, setMounted] = useState(false)
   const [activeService, setActiveService] = useState<Service | null>(null)
   const [modalImageIndex, setModalImageIndex] = useState(0)
+  const [modalVisible, setModalVisible] = useState(false)
   const intervalRef = useRef<NodeJS.Timeout | null>(null)
 
   useEffect(() => {
@@ -236,8 +237,12 @@ export default function ServicesCarousel({ services = [], showAll = false, varia
   const openModal = (s: Service) => {
     setActiveService(s)
     setModalImageIndex(0)
+    setTimeout(() => setModalVisible(true), 10)
   }
-  const closeModal = () => setActiveService(null)
+  const closeModal = () => {
+    setModalVisible(false)
+    setTimeout(() => setActiveService(null), 300)
+  }
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') closeModal() }
@@ -272,7 +277,7 @@ export default function ServicesCarousel({ services = [], showAll = false, varia
   }, [activeService, modalImages.length])
 
   return (
-    <section id="services" className="bg-white pt-8 pb-12 sm:pt-12 sm:pb-20">
+    <section id="services" className="bg-white pt-4 pb-12 sm:pt-12 sm:pb-20">
       {/* Use 95% of the viewport width and center the content */}
       <div className="w-[95%] mx-auto px-2 sm:px-6 lg:px-8">
         <div className="mx-auto max-w-4xl text-center">
@@ -286,10 +291,10 @@ export default function ServicesCarousel({ services = [], showAll = false, varia
         <div className="mt-12 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
           {displayList.map((s, i) => {
             const imgSrc = Array.isArray(s.image) ? s.image[0] : s.image || DEFAULT_IMAGE
-            const baseClasses = `overflow-hidden bg-white rounded-lg shadow-md transform-gpu transition-transform duration-400 ease-in-out border-2 border-transparent transition-colors ${mounted ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4'}`
+            const baseClasses = `overflow-hidden bg-white rounded-lg shadow-md transform-gpu transition-transform duration-700 ease-in-out border-2 border-transparent transition-colors ${mounted ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4'}`
             const hoverBorderClasses = variant === 'compact'
               ? 'hover:border-gray-300 hover:border-4 focus-within:border-gray-300 focus-within:border-4'
-              : 'border-4 border-gray-300 hover:border-red-600 focus-within:border-gray-300'
+              : 'border-3 border-gray-300 hover:border-red-700 focus-within:border-gray-300'
 
                 if (variant === 'stacked') {
                 const imagesForCard = parseImages((s as Service).image)
@@ -340,12 +345,15 @@ export default function ServicesCarousel({ services = [], showAll = false, varia
           <div
             role="dialog"
             aria-modal="true"
-            className="fixed inset-0 z-50 flex items-center justify-center bg-black/65" // Increased transparency from 50 to 30
-            onClick={closeModal} // Close modal when clicking outside
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/65"
+            onClick={closeModal}
           >
             <div
-              className="bg-white rounded-lg max-w-4xl w-[95%] md:w-[75%] shadow-xl overflow-hidden grid grid-cols-1 md:grid-cols-[65%_35%] md:h-[60%] border-4 border-gray-300"
-              onClick={(e) => e.stopPropagation()} // Prevent closing when clicking inside the modal
+              className={`bg-white rounded-lg max-w-4xl w-[95%] md:w-[75%] shadow-xl overflow-hidden grid grid-cols-1 md:grid-cols-[65%_35%] md:h-[60%] border-4 border-gray-300
+                transition-all duration-800 ease-[cubic-bezier(0.68,-0.55,0.27,1.55)]
+                ${modalVisible ? 'opacity-100 scale-100 translate-y-0' : 'opacity-0 scale-75 translate-y-16'}`}
+              style={{ willChange: 'transform, opacity' }}
+              onClick={(e) => e.stopPropagation()}
             >
               {/* Left: image navigator - fixed size so all modals match */}
               <div className="relative w-full h-64 md:h-full flex items-center justify-center overflow-hidden bg-gray-100">

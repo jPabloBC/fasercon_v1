@@ -19,12 +19,13 @@ export const metadata: Metadata = {
 type DBProductRow = {
   id: string
   name: string
+  sku?: string | null
   description?: string | null
   image_url?: string | string[] | null
   features?: string[] | null
   applications?: string[] | null
-    unit_size?: string | null
-    measurement_unit?: string | null
+  unit_size?: string | null
+  measurement_unit?: string | null
   price?: number | null
   visible?: boolean | null
   order?: number | null
@@ -35,6 +36,7 @@ export default async function ProductsPage() {
   type GalleryProduct = {
     id: string
     name: string
+    sku?: string | null
     description?: string | null
     image?: string | null
     features: string[]
@@ -76,9 +78,9 @@ export default async function ProductsPage() {
       return {
         id: p.id,
         name: p.name,
+        sku: p.sku ?? null,
         description: p.description,
         image: normalizedImages[0] || null,
-        // Prefer `characteristics` if available
         features: p.characteristics || p.features || [],
         applications: p.applications || [],
         unit_size: p.unit_size,
@@ -95,7 +97,7 @@ export default async function ProductsPage() {
   return (
     <main className="min-h-screen">
       <Navbar />
-      <section className="relative pt-28 pb-12">
+      <section className="relative pt-16 md:pt-20 lg:pt-24 pb-12">
         {/* Client-side store UI with search, pagination and add-to-quote */}
         <ProductsStore products={products} />
 

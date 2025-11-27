@@ -1,4 +1,3 @@
-
 'use client'
 import React, { useEffect, useState } from 'react'
 import Link from 'next/link'
@@ -13,12 +12,14 @@ const navigation = [
   { name: 'Productos', href: '/products' },
   // { name: 'Proyectos', href: '/projects' },
   { name: 'Clientes', href: '/clients' },
+  { name: 'Nosotros', href: '/about-us' },
   { name: 'Contacto', href: '#contacto' },
 ]
 
 export default function Navbar() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   const [quoteCount, setQuoteCount] = useState(0)
+  const [loading, setLoading] = useState(false)
   const pathname = usePathname()
   const router = useRouter()
 
@@ -89,7 +90,8 @@ export default function Navbar() {
                 alt="Fasercom Logo"
                 width={180}
                 height={60}
-                className="h-18 w-auto"
+                className="h-10 w-auto sm:h-12 md:h-16 lg:h-18 xl:h-18"
+                style={{ width: 'auto', height: 'auto', aspectRatio: 'auto' }}
                 priority
               />
             </div>
@@ -105,7 +107,7 @@ export default function Navbar() {
             <Bars3Icon className="h-6 w-6" aria-hidden="true" />
           </button>
         </div>
-        <div className="hidden lg:flex lg:gap-x-12">
+        <div className="hidden lg:flex gap-x-2 sm:gap-x-4 md:gap-x-5 lg:gap-x-6 xl:gap-x-10 2xl:gap-x-12">
           {navigation.map((item) => (
             <Link
               key={item.name}
@@ -149,6 +151,12 @@ export default function Navbar() {
                 <XMarkIcon className="h-6 w-6" aria-hidden="true" />
               </button>
             </div>
+            {loading && (
+              <div className="flex justify-center items-center py-4">
+                <span className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-red-600"></span>
+                <span className="ml-2 text-red-600 font-semibold">Cargando...</span>
+              </div>
+            )}
             <div className="mt-6 flow-root">
               <div className="-my-6 divide-y divide-gray-500/10">
                 <div className="space-y-2 py-6">
@@ -156,9 +164,17 @@ export default function Navbar() {
                     <Link
                       key={item.name}
                       href={item.href}
-                      onClick={(e) => {
-                        handleNavClick(e, item.href)
-                        setMobileMenuOpen(false)
+                      onClick={async (e) => {
+                        if (pathname !== item.href && !item.href.startsWith('#')) {
+                          setLoading(true)
+                          handleNavClick(e, item.href)
+                          await router.push(item.href)
+                          setLoading(false)
+                          setMobileMenuOpen(false)
+                        } else {
+                          handleNavClick(e, item.href)
+                          setMobileMenuOpen(false)
+                        }
                       }}
                       className={`-mx-3 block rounded-lg px-3 py-2 text-base font-semibold leading-7 hover:bg-gray-50 ${
                         isActive(item.href) ? 'text-red-600' : 'text-gray-400'

@@ -57,7 +57,19 @@ const Hero = () => {
   }
 
   return (
-    <div className="relative isolate px-6 pt-14 lg:px-8 bg-white">
+    <div className="relative isolate px-6 pt-8 md:pt-10 lg:pt-12 lg:px-8 bg-white">
+      {/* Fondo con imagen y transparencia */}
+      <div className="absolute inset-0 -z-20">
+        <div
+          className="w-full h-full bg-cover bg-center"
+          style={{
+            backgroundImage: 'url(https://gbdoqxdldyszmfzqzmuk.supabase.co/storage/v1/object/public/fasercon/images/background/main_background.jpeg)',
+            opacity: 0.60,
+            width: '100%',
+            height: '100%',
+          }}
+        />
+      </div>
       <div
         className="absolute inset-x-0 -top-40 -z-10 transform-gpu overflow-hidden blur-3xl sm:-top-80"
         aria-hidden="true"
@@ -77,7 +89,7 @@ const Hero = () => {
               Fabricación y servicios para la{' '}
               <span className="text-red-600">Industria y Minería</span>{' '}
             </h1>
-            <p className="mt-6 text-lg leading-8 text-gray-600 font-sintony font-normal">
+            <p className="mt-6 text-lg leading-8 text-gray-700 font-sintony font-normal">
               Especialistas en soluciones integrales para cubiertas industriales y residenciales. 
               Ofrecemos diseño, fabricación e instalación de cubiertas metálicas con materiales de 
               primera calidad y garantía extendida.
@@ -85,13 +97,13 @@ const Hero = () => {
             <div className="mt-10 flex items-center gap-x-6">
               <Link
                 href="/quote"
-                className="rounded-md bg-red-600 px-3.5 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-red-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-600"
+                className="rounded-md bg-red-600 px-3.5 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-red-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-600"
               >
                 Cotizar
               </Link>
               <Link
                 href="/projects"
-                className="text-sm font-semibold leading-6 text-gray-900 group inline-flex items-center"
+                className="text-sm font-semibold text-red-600 group inline-flex items-center border-2 border-red-600 p-2 rounded-md"
               >
                 Ver Proyectos{' '}
                 <ChevronRightIcon className="ml-1 h-4 w-4 group-hover:translate-x-1 transition-transform" />
@@ -126,7 +138,7 @@ const Hero = () => {
           </div>
           <div className="relative mt-16 sm:mt-20 lg:col-span-6 lg:mt-0 xl:col-span-7">
             {/* Hero project slideshow */}
-            <div className="relative h-[500px] sm:h-[600px] lg:h-[750px] w-full rounded-2xl overflow-hidden bg-white shadow-xl">
+            <div className="relative h-[500px] sm:h-[600px] lg:h-[675px] xl:h-[675px] w-full rounded-2xl overflow-hidden bg-white shadow-xl border-4 border-white">
               {slides.map((slide, index) => (
                 <div
                   key={slide.id}

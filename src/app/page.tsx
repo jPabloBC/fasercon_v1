@@ -109,9 +109,9 @@ export default async function Home() {
       };
     });
   // mapped products ready for ProductGallery
-  } catch (err) {
-    // console.error('Error loading products for home:', err)
-    // console.error('Error al consultar productos:', err);
+  } catch {
+    // console.error('Error loading products for home')
+    // console.error('Error al consultar productos');
   }
 
   // Eliminar productos duplicados basados en el nombre y luego los ordeno de forma aleatoria
@@ -135,20 +135,21 @@ export default async function Home() {
   return (
     <main className="min-h-screen">
       <Navbar />
-  <Hero />
-  <HomeServicesCarousel services={servicesData} intro={"Fabricamos y montamos estructuras metálicas, soportaciones y soluciones industriales personalizadas, entregando calidad, precisión y confianza en cada proyecto."} />
-  <div className="mb-32 flex justify-center">
-    <Link href="/services" className="inline-block rounded-md bg-red-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-red-500">Ver  nuestros servicios</Link>
-  </div>
-  
-  <ProductGallery 
-  products={products.map(product => ({
-    ...product,
-    moreInfoLink: `/products/${product.id}`
-  }))} 
-  limit={4} 
-  columns={4} 
-/> 
+        <h1 className="sr-only">Fasercon - Estructuras Metálicas y Soluciones Industriales</h1>
+        <Hero />
+        <HomeServicesCarousel services={servicesData} intro={"Fabricamos y montamos estructuras metálicas, soportaciones y soluciones industriales personalizadas, entregando calidad, precisión y confianza en cada proyecto."} />
+        <div className="mb-32 flex justify-center">
+          <Link href="/services" className="inline-block rounded-md bg-red-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-red-500">Ver  nuestros servicios</Link>
+        </div>
+        
+        <ProductGallery 
+        products={products.map(product => ({
+          ...product,
+          moreInfoLink: `/products/${product.id}`
+        }))} 
+        limit={4} 
+        columns={4} 
+      /> 
       <ContactForm />
       <Footer />
     </main>

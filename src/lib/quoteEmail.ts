@@ -74,12 +74,12 @@ export const buildQuoteEmail = ({ contact, items }: { contact: QuoteContact, ite
   }).join('');
 
   return {
-    subject: 'Cotización enviada - Fasercon',
+    subject: 'Solicitud de Cotización - Fasercon',
     html: `
       <div style="font-family:Arial,sans-serif;max-width:600px;margin:auto;">
-        <h2 style="background:#e53e3e;color:white;padding:16px 0;text-align:center;">Cotización Fasercon</h2>
+        <h2 style="background:#e53e3e;color:white;padding:16px 0;text-align:center;">Solicitud de Cotización Fasercon</h2>
         <p>Hola <b>${contact.company}</b>,</p>
-        <p>Gracias por solicitar una cotización. Estos son los detalles enviados:</p>
+        <p>Gracias por enviar tu solicitud de cotización. Estos son los detalles recibidos:</p>
         <table style="width:100%;border-collapse:collapse;margin-bottom:16px;">
           <thead>
             <tr style="background:#f7fafc;">
@@ -105,7 +105,7 @@ export const buildQuoteEmail = ({ contact, items }: { contact: QuoteContact, ite
         <p style="font-size:12px;color:#888;text-align:center;">Este correo es automático. No respondas a este mensaje.</p>
       </div>
     `,
-    text: `Cotización Fasercon\n\nEmpresa: ${contact.company}\nEmail: ${contact.email}\nTeléfono: ${contact.phone}\n${contact.rut ? `RUT/Documento: ${contact.rut}\n` : ''}\n\nProductos:\n${items.map(i => {
+    text: `Solicitud de Cotización Fasercon\n\nEmpresa: ${contact.company}\nEmail: ${contact.email}\nTeléfono: ${contact.phone}\n${contact.rut ? `RUT/Documento: ${contact.rut}\n` : ''}\n\nProductos:\n${items.map(i => {
       const symbol = unitSymbol(i.measurement_unit);
       const unitSizeStr = toFraction(i.unit_size);
       return `- ${i.name} (${i.qty} ${unitSizeStr}${symbol ? ' ' + symbol : ''})`;
@@ -126,11 +126,11 @@ export const buildInternalQuoteEmail = ({ contact, items }: { contact: QuoteCont
   }).join('');
 
   return {
-    subject: 'Nueva Cotización Interna - Fasercon',
+    subject: 'Nueva Solicitud de Cotización (Interno) - Fasercon',
     html: `
       <div style="font-family:Arial,sans-serif;max-width:600px;margin:auto;">
-        <h2 style="background:#2d3748;color:white;padding:16px 0;text-align:center;">Cotización Interna Fasercon</h2>
-        <p>Se ha generado una nueva cotización con los siguientes detalles:</p>
+        <h2 style="background:#2d3748;color:white;padding:16px 0;text-align:center;">Solicitud de Cotización Fasercon</h2>
+        <p>Se ha recibido una nueva solicitud de cotización con los siguientes detalles:</p>
         <table style="width:100%;border-collapse:collapse;margin-bottom:16px;">
           <thead>
             <tr style="background:#edf2f7;">
@@ -155,7 +155,7 @@ export const buildInternalQuoteEmail = ({ contact, items }: { contact: QuoteCont
         <p style="font-size:12px;color:#888;text-align:center;">Este correo es interno y está destinado únicamente para uso administrativo.</p>
       </div>
     `,
-    text: `Nueva Cotización Interna Fasercon\n\nEmpresa: ${contact.company}\nEmail: ${contact.email}\nTeléfono: ${contact.phone}\n${contact.rut ? `RUT/Documento: ${contact.rut}\n` : ''}\n\nProductos:\n${items.map(i => {
+    text: `Nueva Solicitud de Cotización (Interno) Fasercon\n\nEmpresa: ${contact.company}\nEmail: ${contact.email}\nTeléfono: ${contact.phone}\n${contact.rut ? `RUT/Documento: ${contact.rut}\n` : ''}\n\nProductos:\n${items.map(i => {
       const symbol = unitSymbol(i.measurement_unit);
       const unitSizeStr = toFraction(i.unit_size);
       return `- ${i.name} (${i.qty} ${unitSizeStr}${symbol ? ' ' + symbol : ''})`;

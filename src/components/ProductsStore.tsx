@@ -9,9 +9,9 @@ import { supabase } from '@/lib/supabase'
 type Product = {
   id: string | number
   name: string
+  sku?: string | null
   description?: string | null
   image?: string | null
-  // Puede venir como string, array o null desde la API/DB
   image_url?: string | string[] | null
   features?: string[]
   applications?: string[]
@@ -47,6 +47,7 @@ export default function ProductsStore({ products }: Props) {
       return {
         id: String(row.id ?? ''),
         name: String(row.name ?? ''),
+        sku: row.sku != null ? String(row.sku).trim() : '',
         description: (typeof row.description === 'string' ? row.description : null),
         image: firstImage || null,
         image_url: typeof imageArray[0] === 'string' ? (imageArray[0] as string) : null,
@@ -147,13 +148,40 @@ export default function ProductsStore({ products }: Props) {
 
   const filteredGroups = useMemo(() => {
     const q = query.trim().toLowerCase()
+    if (q) {
+      // Debug: imprimir la consulta y algunos SKUs para verificar coincidencias
+      try { console.log('[ProductsStore] search q=', q) } catch {}
+      // Si hay búsqueda, mostrar productos individuales (sin agrupar)
+      return list
+        .filter((p) => {
+          try { console.log('[ProductsStore] checking', p.id, 'sku=', p.sku) } catch {}
+          // Normalize SKU and query: ignore non-alphanumeric characters
+          const skuNorm = p.sku ? String(p.sku).toLowerCase().replace(/[^a-z0-9]/g, '') : ''
+          const qAlnum = q.replace(/[^a-z0-9]/g, '')
+          const matchesQuery =
+            (p.name || '').toLowerCase().includes(q) ||
+            (p.description || '').toLowerCase().includes(q) ||
+            (skuNorm && qAlnum ? skuNorm.includes(qAlnum) : false)
+          if (!matchesQuery) return false
+          if (selectedFeatures.length === 0) return true
+          return selectedFeatures.every((sf) => {
+            const pf = (p.features || []).map(String)
+            return pf.includes(sf)
+          })
+        })
+        .map((p) => ({ key: p.id, items: [p] }))
+    }
+    // Si no hay búsqueda, agrupar normalmente
     return groups.filter((g) => {
-      // group matches if any item matches the search and filters
       const anyMatches = g.items.some((p) => {
-        const matchesQuery = !q || (p.name || '').toLowerCase().includes(q) || (p.description || '').toLowerCase().includes(q)
+        const skuNorm = p.sku ? String(p.sku).toLowerCase().replace(/[^a-z0-9]/g, '') : ''
+        const qAlnum = q.replace(/[^a-z0-9]/g, '')
+        const matchesQuery =
+          !q ||
+          (p.name || '').toLowerCase().includes(q) ||
+          (p.description || '').toLowerCase().includes(q) ||
+          (skuNorm && qAlnum ? skuNorm.includes(qAlnum) : false)
         if (!matchesQuery) return false
-
-        // check selectedFeatures: only filter by features
         if (selectedFeatures.length === 0) return true
         return selectedFeatures.every((sf) => {
           const pf = (p.features || []).map(String)
@@ -162,7 +190,7 @@ export default function ProductsStore({ products }: Props) {
       })
       return anyMatches
     })
-  }, [groups, query, selectedFeatures])
+  }, [groups, list, query, selectedFeatures])
 
   const pages = Math.max(1, Math.ceil(filteredGroups.length / pageSize))
   const start = (page - 1) * pageSize

@@ -30,10 +30,67 @@ export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const sku = searchParams.get('sku');
   const name = searchParams.get('name');
+  const q = searchParams.get('q');
   const publicOnly = searchParams.get('public');
 
   try {
-    if (sku || name || publicOnly) {
+
+    if (q || sku || name || publicOnly) {
+      // If a free-text query `q` is provided, search across multiple product columns
+      if (q) {
+        const ilikeQ = `%${q}%`;
+        // Only search across textual product fields. Exclude JSON/array and numeric
+        // columns (e.g. characteristics, features, applications, unit_size) because
+        // applying `ilike` to jsonb/numeric types causes Postgres/PostgREST errors
+        // such as: "operator does not exist: jsonb ~~* unknown".
+        const textFields = [
+          'name',
+          'description',
+          'sku',
+          'manufacturer',
+          'measurement_unit',
+          'measurement_type',
+        ];
+        const orExpr = textFields.map((f) => `${f}.ilike.${ilikeQ}`).join(',');
+
+        const { data, error } = await supabaseAdmin
+          .from('fasercon_products')
+          .select('*')
+          .or(orExpr)
+          .order('order', { ascending: true })
+          .limit(1000);
+
+        if (error) {
+          console.error('Error buscando productos (q):', error)
+          return NextResponse.json({ error: 'Error al buscar productos' }, { status: 500 })
+        }
+
+        const products = (data || []).map((product) => {
+          if (product.unit_size && !isNaN(product.unit_size)) {
+            const decimalValue = parseFloat(product.unit_size)
+            product.unit_size = decimalToFraction(decimalValue)
+          }
+          try {
+            const imgs = Array.isArray(product.image_url) ? (product.image_url as unknown[]) : (product.image_url ? [product.image_url] : [])
+            const cleaned = imgs.map((u: unknown) => (typeof u === 'string' ? u.trim() : '')).filter(Boolean) as string[]
+            ;(product as Record<string, unknown>).images = cleaned.length ? cleaned : null
+            ;(product as Record<string, unknown>).image_url = cleaned.length ? cleaned[0] : null
+          } catch {}
+          // DEBUG: Log para verificar qué campos tiene el producto
+          console.log('PRODUCTO:', {
+            id: product.id,
+            name: product.name,
+            sku: product.sku,
+            description: product.description,
+            image_url: product.image_url,
+            characteristics: product.characteristics
+          })
+          return product
+        })
+
+        return NextResponse.json({ products })
+      }
+
       const query = supabaseAdmin.from('fasercon_products').select('*')
 
       if (sku) {
