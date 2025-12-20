@@ -1,17 +1,13 @@
 import countries, { LocaleData } from 'i18n-iso-countries'
+// Synchronously register Spanish locale (tsconfig allows JSON imports)
+import esLocale from 'i18n-iso-countries/langs/es.json'
 
-// register Spanish names (use dynamic import for ESM compatibility)
-;(async () => {
-  try {
-    const localeModule = await import('i18n-iso-countries/langs/es.json')
-  // prefer the `default` export when present (ESM interop), otherwise use the module itself
-  const loc = ((localeModule as unknown) as { default?: LocaleData }).default ?? (localeModule as unknown as LocaleData)
-  // registerLocale expects LocaleData
-  countries.registerLocale(loc)
-  } catch {
-    // ignore - locales may already be registered or not available in some environments
-  }
-})()
+const esLoc = (esLocale as unknown) as LocaleData
+try {
+  countries.registerLocale(esLoc)
+} catch {
+  // ignore if already registered
+}
 
 type CountriesMap = Record<string, string>
 const all = (countries.getNames('es', { select: 'official' }) || {}) as CountriesMap

@@ -9,6 +9,7 @@ import {
   CurrencyDollarIcon,
   ChartBarIcon,
 } from '@heroicons/react/24/outline'
+import { formatCLP } from '@/lib/format'
 
 interface DashboardStats {
   totalContacts: number
@@ -139,7 +140,7 @@ export default function DashboardPage() {
     },
     {
       name: 'Ingresos Estimados',
-      value: `$${stats.totalRevenue.toLocaleString()}`,
+      value: `$${formatCLP(stats.totalRevenue)}`,
       icon: CurrencyDollarIcon,
       color: 'bg-purple-500',
     },
@@ -192,7 +193,7 @@ export default function DashboardPage() {
                           Nueva cotización de {quote.name}
                         </p>
                         <p className="text-sm text-gray-500">
-                          {quote.area}m² - ${quote.estimatedPrice.toLocaleString()}
+                          {quote.area}m² - ${formatCLP(quote.estimatedPrice)}
                         </p>
                       </div>
                       <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
@@ -255,7 +256,7 @@ export default function DashboardPage() {
                             {quote.materialType}
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                            ${quote.estimatedPrice.toLocaleString()}
+                            ${formatCLP(quote.estimatedPrice)}
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap">
                             <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${

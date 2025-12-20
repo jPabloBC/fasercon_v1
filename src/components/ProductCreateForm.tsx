@@ -3,6 +3,7 @@ import Image from 'next/image'
 import { Pair, Product, SupplierRef, NewProduct } from '@/lib/types'
 
 type Props = {
+    alert?: { type: 'success' | 'error'; message: string } | null
   matchingProducts: Product[]
   showMatches: boolean
   selectedExistingImages: string[]
@@ -41,9 +42,11 @@ type Props = {
   setShowMatches: React.Dispatch<React.SetStateAction<boolean>>
   PhotoIcon: React.ComponentType<React.SVGProps<SVGSVGElement> & { className?: string }>
   fetchProducts?: () => Promise<unknown>
+  onProductCreated?: (product: Product) => void
 }
 
 export default function ProductCreateForm(props: Props) {
+    // No local alert state — parent `props.alert` and `props.setAlert` are used instead.
   const {
     matchingProducts,
     showMatches,
@@ -79,7 +82,6 @@ export default function ProductCreateForm(props: Props) {
     setSearchQuery,
     creating,
     setCreating,
-    setShowCreateForm,
     setShowMatches,
     PhotoIcon,
   } = props
@@ -94,8 +96,18 @@ export default function ProductCreateForm(props: Props) {
   }, [matchingProducts, showMatches])
 
   return (
-    <div className="bg-gray-50 shadow rounded p-4 mb-6 -mt-14">
-      <h3 className="text-lg font-semibold mb-3 text-gray-900">Crear producto</h3>
+    <div className="bg-gray-50 shadow rounded p-4 mb-2 -mt-1 relative">
+      {/* Centered Alert Overlay - fixed to viewport */}
+      {props.alert && props.alert.message && (
+        <div style={{position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none'}}>
+          <div
+            className={`px-8 py-5 rounded-xl shadow-2xl text-center text-xl font-semibold transition-all duration-300 pointer-events-auto ${props.alert.type === 'success' ? 'bg-green-600/90 text-white' : 'bg-red-600/90 text-white'}`}
+            style={{backdropFilter: 'blur(4px)', minWidth: '320px', maxWidth: '90vw', opacity: 0.98, boxShadow: '0 8px 32px rgba(0,0,0,0.25)'}}>
+            {props.alert.message}
+          </div>
+        </div>
+      )}
+      <h3 className="text-lg font-semibold mb-3 text-gray-600">Crear Material - Servicio</h3>
       {showMatches && matchingProducts.length > 0 && (
         <div className="mb-4">
           <div className="flex items-center justify-between mb-2">
@@ -176,84 +188,85 @@ export default function ProductCreateForm(props: Props) {
         </div>
       )}
 
-      <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-4">
-            <div className="relative">
-          <label className="block text-sm font-medium mb-1 text-gray-800">Nombre</label>
-          <input
-            autoComplete="off"
-            value={newProduct.name}
-            onFocus={() => matchingProducts.length && setShowMatches(true)}
-            onBlur={() => setTimeout(() => setShowMatches(false), 150)}
-            onChange={(e) => {
-              const value = e.target.value
-              setNewProduct((prev: NewProduct) => ({ ...prev, name: value }))
-              setShowMatches(true)
-                if (setSearchQuery) setSearchQuery(value)
-            }}
-            className="border px-3 py-2 rounded h-10 w-full bg-white text-gray-800"
-          />
-          {(() => {
-            console.log('[ProductCreateForm RENDER] showMatches:', showMatches, 'matchingProducts.length:', matchingProducts.length)
-            return null
-          })()}
-          {showMatches && matchingProducts.length > 0 && (
-            <div className="absolute left-0 right-0 mt-1 z-50 max-h-64 overflow-y-auto rounded border border-gray-200 bg-white shadow-lg">
-                {matchingProducts.map((m: Product) => (
-                <button
-                  key={m.id}
-                  type="button"
-                  onMouseDown={(event) => event.preventDefault()}
-                  onClick={() => handleSelectProduct(m)}
-                  className="w-full text-left px-3 py-2 text-sm text-gray-800 hover:bg-gray-100 focus:bg-gray-100 flex items-start gap-3"
-                >
-                  {/* thumbnail */}
+      {/* Nombre: full width at top, others below */}
+      <div className="mb-3">
+        <label className="block text-sm font-medium mb-1 text-gray-800">Nombre</label>
+        <input
+          autoComplete="off"
+          value={newProduct.name}
+          onFocus={() => matchingProducts.length && setShowMatches(true)}
+          onBlur={() => setTimeout(() => setShowMatches(false), 150)}
+          onChange={(e) => {
+            const value = e.target.value
+            setNewProduct((prev: NewProduct) => ({ ...prev, name: value }))
+          }}
+          className="border px-3 py-2 rounded h-10 w-full bg-white text-gray-800"
+        />
+        {(() => {
+          console.log('[ProductCreateForm RENDER] showMatches:', showMatches, 'matchingProducts.length:', matchingProducts.length)
+          return null
+        })()}
+        {showMatches && matchingProducts.length > 0 && (
+          <div className="absolute left-0 right-0 mt-1 z-50 max-h-64 overflow-y-auto rounded border border-gray-200 bg-white shadow-lg">
+            {matchingProducts.map((m: Product) => (
+              <button
+                key={m.id}
+                type="button"
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => handleSelectProduct(m)}
+                className="w-full text-left px-3 py-2 text-sm text-gray-800 hover:bg-gray-100 focus:bg-gray-100 flex items-start gap-3"
+              >
+                {/* thumbnail */}
+                {(() => {
+                  const imgs = Array.isArray(m.image_url) ? m.image_url : m.image_url ? [m.image_url] : []
+                  const thumb = imgs && imgs.length ? imgs[0] : null
+                  return thumb ? (
+                    <div className="w-12 h-12 relative flex-shrink-0 rounded bg-gray-50 border overflow-hidden">
+                      <Image src={thumb} alt={m.name || 'thumb'} fill className="object-contain" sizes="48px" />
+                    </div>
+                  ) : (
+                    <div className="w-12 h-12 flex items-center justify-center text-gray-400 bg-gray-50 border rounded">(vacío)</div>
+                  )
+                })()}
+
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="font-medium text-gray-900 truncate">{m.name}</div>
+                    <div className="text-xs text-gray-600 ml-2">{m.sku ? String(m.sku) : ''}</div>
+                  </div>
+                  <div className="text-xs text-gray-500 truncate">
+                    {m.manufacturer ? `${m.manufacturer}` : ''}
+                    {typeof m.price === 'number' ? ` · ${formatCurrencyInput(m.price)}` : ''}
+                    {m.unit_size ? ` · ${m.unit_size}${m.measurement_unit ? ` ${unitLabels[m.measurement_unit] || m.measurement_unit}` : ''}` : ''}
+                  </div>
+                  <div className="text-xs text-gray-500 mt-1 line-clamp-2">
+                    <span className="font-semibold">Descripción:</span> {m.description ? m.description : <span className="text-gray-400">(vacío)</span>}
+                  </div>
+                  {/* characteristics (normalize string/array) */}
                   {(() => {
-                    const imgs = Array.isArray(m.image_url) ? m.image_url : m.image_url ? [m.image_url] : []
-                    const thumb = imgs && imgs.length ? imgs[0] : null
-                    return thumb ? (
-                      <div className="w-12 h-12 relative flex-shrink-0 rounded bg-gray-50 border overflow-hidden">
-                        <Image src={thumb} alt={m.name || 'thumb'} fill className="object-contain" sizes="48px" />
+                    const raw = m.characteristics
+                    const arr = Array.isArray(raw) ? raw.map(String) : (raw ? String(raw).split(',').map(s => s.trim()).filter(Boolean) : [])
+                    return (
+                      <div className="mt-2 flex gap-1 flex-wrap">
+                        <span className="font-semibold text-[10px]">Características:</span>
+                        {arr.length > 0
+                          ? arr.slice(0, 4).map((c, i) => (
+                              <span key={i} className="text-[10px] px-2 py-0.5 bg-gray-100 text-gray-700 rounded">{c}</span>
+                            ))
+                          : <span className="text-gray-400 text-[10px]">(vacío)</span>}
+                        {arr.length > 4 && <span className="text-[10px] text-gray-500">+{arr.length - 4}</span>}
                       </div>
-                    ) : (
-                      <div className="w-12 h-12 flex items-center justify-center text-gray-400 bg-gray-50 border rounded">(vacío)</div>
                     )
                   })()}
+                </div>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
 
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="font-medium text-gray-900 truncate">{m.name}</div>
-                      <div className="text-xs text-gray-600 ml-2">{m.sku ? String(m.sku) : ''}</div>
-                    </div>
-                    <div className="text-xs text-gray-500 truncate">
-                      {m.manufacturer ? `${m.manufacturer}` : ''}
-                      {typeof m.price === 'number' ? ` · ${formatCurrencyInput(m.price)}` : ''}
-                      {m.unit_size ? ` · ${m.unit_size}${m.measurement_unit ? ` ${unitLabels[m.measurement_unit] || m.measurement_unit}` : ''}` : ''}
-                    </div>
-                    <div className="text-xs text-gray-500 mt-1 line-clamp-2">
-                      <span className="font-semibold">Descripción:</span> {m.description ? m.description : <span className="text-gray-400">(vacío)</span>}
-                    </div>
-                    {/* characteristics (normalize string/array) */}
-                    {(() => {
-                      const raw = m.characteristics
-                      const arr = Array.isArray(raw) ? raw.map(String) : (raw ? String(raw).split(',').map(s => s.trim()).filter(Boolean) : [])
-                      return (
-                        <div className="mt-2 flex gap-1 flex-wrap">
-                          <span className="font-semibold text-[10px]">Características:</span>
-                          {arr.length > 0
-                            ? arr.slice(0, 4).map((c, i) => (
-                                <span key={i} className="text-[10px] px-2 py-0.5 bg-gray-100 text-gray-700 rounded">{c}</span>
-                              ))
-                            : <span className="text-gray-400 text-[10px]">(vacío)</span>}
-                          {arr.length > 4 && <span className="text-[10px] text-gray-500">+{arr.length - 4}</span>}
-                        </div>
-                      )
-                    })()}
-                  </div>
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
+      {/* Other inputs below Nombre, keep original grid for rest */}
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-4">
 
         <div>
           <label className="block text-sm font-medium mb-1">SKU</label>
@@ -396,13 +409,24 @@ export default function ProductCreateForm(props: Props) {
 
         <div>
           <label className="block text-sm font-medium mb-1 text-gray-800">Precio</label>
-          <input type="text" inputMode="numeric" value={newProductPriceDisplay || formatCurrencyInput(newProduct.price ?? null)} onChange={(e) => {
-            const raw = e.target.value
-            const digits = raw.replace(/\D/g, '')
-            const num = digits ? Number(digits) : undefined
-            setNewProduct((prev: NewProduct) => ({ ...prev, price: num }))
-            setNewProductPriceDisplay(num != null ? formatCurrencyInput(num) : '')
-          }} className="border px-3 py-2 rounded h-10 w-full bg-white text-gray-800" />
+          <input
+            type="text"
+            inputMode="numeric"
+            value={(() => {
+              const val = newProductPriceDisplay || formatCurrencyInput(newProduct.price ?? null);
+              // Remove any leading $ and spaces
+              const clean = val.replace(/^\$\s*/, '');
+              return `$ ${clean || '0'}`;
+            })()}
+            onChange={(e) => {
+              const raw = e.target.value.replace(/^\$\s*/, '');
+              const digits = raw.replace(/\D/g, '');
+              const num = digits ? Number(digits) : undefined;
+              setNewProduct((prev: NewProduct) => ({ ...prev, price: num }));
+              setNewProductPriceDisplay(num != null ? formatCurrencyInput(num) : '');
+            }}
+            className="border px-3 py-2 rounded h-10 w-full bg-white text-gray-800"
+          />
         </div>
 
         <div>
@@ -610,22 +634,22 @@ export default function ProductCreateForm(props: Props) {
         <button
           disabled={creating}
           onClick={async () => {
-            let imageList: string[] | undefined = selectedExistingImages.length > 0 ? [...selectedExistingImages] : undefined
+            let imageList: string[] | undefined = selectedExistingImages.length > 0 ? [...selectedExistingImages] : undefined;
             if (newFiles.length > 0) {
               for (const file of newFiles) {
-                const fd = new FormData()
-                const filename = `${file.name}`
-                fd.append('file', file)
-                fd.append('filename', filename)
-                const res = await fetch('/api/products/upload', { method: 'POST', body: fd })
-                const json = await res.json()
-                const persisted: string | undefined = json.publicUrl || json.url
-                if (persisted) imageList = imageList ? [...imageList, persisted] : [persisted]
+                const fd = new FormData();
+                const filename = `${file.name}`;
+                fd.append('file', file);
+                fd.append('filename', filename);
+                const res = await fetch('/api/products/upload', { method: 'POST', body: fd });
+                const json = await res.json();
+                const persisted: string | undefined = json.publicUrl || json.url;
+                if (persisted) imageList = imageList ? [...imageList, persisted] : [persisted];
               }
             }
 
-            const unitTokens = unitSizeInputs.map((s: string) => s.trim()).filter(Boolean)
-            const descTokens = descriptionInputs
+            const unitTokens = unitSizeInputs.map((s: string) => s.trim()).filter(Boolean);
+            const descTokens = descriptionInputs;
 
             const base: Record<string, unknown> = {
               name: newProduct.name,
@@ -642,116 +666,127 @@ export default function ProductCreateForm(props: Props) {
               measurement_type_other: newProduct.measurement_type_other || null,
               measurement_unit_other: newProduct.measurement_unit_other || null,
               manufacturer: newProduct.manufacturer || null,
-            }
+            };
 
-            let supplierPayload: unknown = undefined
+            let supplierPayload: unknown = undefined;
             if (supplierSelected) {
-              supplierPayload = { id: supplierSelected.id, name: supplierSelected.name }
+              supplierPayload = { id: supplierSelected.id, name: supplierSelected.name };
             } else if (showSupplierDetails && (newProduct.supplier_email || newProduct.supplier_address || newProduct.supplier_country || supplierQuery)) {
               supplierPayload = {
                 name: supplierQuery || newProduct.supplier || newProduct.manufacturer || 'Proveedor',
                 email: newProduct.supplier_email || null,
                 address: newProduct.supplier_address || null,
                 country: newProduct.supplier_country || null,
-              }
+              };
             } else {
-              const typed = supplierQuery || (newProduct.supplier as string) || ''
-              if (typed) supplierPayload = typed
+              const typed = supplierQuery || (newProduct.supplier as string) || '';
+              if (typed) supplierPayload = typed;
             }
 
-            setCreating(true)
+            setCreating(true);
             try {
-              const variants = unitTokens.length > 0 ? unitTokens : ['']
-              let created = 0
-              const errors: string[] = []
+              const variants = unitTokens.length > 0 ? unitTokens : [''];
+              let created = 0;
+              const errors: string[] = [];
 
               for (let i = 0; i < variants.length; i++) {
-                const ut = variants[i]
-                let decimal: number | null = null
+                const ut = variants[i];
+                let decimal: number | null = null;
                 if (ut) {
-                  const conv = convertFractionToDecimal(ut)
-                  if (typeof conv === 'number' && !isNaN(conv)) decimal = conv
+                  const conv = convertFractionToDecimal(ut);
+                  if (typeof conv === 'number' && !isNaN(conv)) decimal = conv;
                   else {
-                    errors.push(`Tamaño inválido: "${ut}"`)
-                    continue
+                    errors.push(`Tamaño inválido: "${ut}"`);
+                    continue;
                   }
                 }
 
-                const descriptionForI = descTokens.length > 0 ? (descTokens[i] ?? '') : (descriptionInputs[0] || newProduct.description || '')
+                const descriptionForI = descTokens.length > 0 ? (descTokens[i] ?? '') : (descriptionInputs[0] || newProduct.description || '');
 
                 const payload: Record<string, unknown> = {
                   ...base,
                   unit_size: decimal,
                   description: descriptionForI,
-                }
+                };
                 if (supplierPayload !== undefined) {
-                  (payload as { supplier?: unknown }).supplier = supplierPayload as unknown
+                  (payload as { supplier?: unknown }).supplier = supplierPayload as unknown;
                 }
 
-                const res = await fetch('/api/products', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
+                const res = await fetch('/api/products', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
                 if (!res.ok) {
                   try {
-                    const j = await res.json()
-                    errors.push(j?.error || (Array.isArray(j?.errors) ? j.errors.join(', ') : `Error HTTP ${res.status}`))
+                    const j = await res.json();
+                    errors.push(j?.error || (Array.isArray(j?.errors) ? j.errors.join(', ') : `Error HTTP ${res.status}`));
                   } catch {
-                    errors.push(`Error HTTP ${res.status}`)
+                    errors.push(`Error HTTP ${res.status}`);
                   }
                 } else {
-                  created++
+                  created++;
+                  // Si solo se creó una variante y hay función para notificar al padre, llama a onProductCreated
+                  if (variants.length === 1 && props.onProductCreated) {
+                    try {
+                      const createdJson = await res.json();
+                      if (createdJson && createdJson.product) {
+                        props.onProductCreated(createdJson.product);
+                      }
+                    } catch {}
+                  }
                 }
               }
 
-              // const productsData = await fetchProducts() // No usada
-              setNewProduct({ name: '', description: '', price: 0, visible: false, order: 0, features: [], applications: [], characteristics: [], unit_size: '', measurement_type: '', measurement_unit: '', measurement_type_other: '', measurement_unit_other: '', stock: 0, manufacturer: '', supplier: '', _file: null })
-              setCharRows([])
-              setAppRows([])
-              setUnitSizeInputs([''])
-              setDescriptionInputs([''])
-              setSupplierSelected(null)
-              setSupplierQuery('')
-              setShowSupplierDetails(false)
-              setSelectedExistingImages([])
-              setNewFiles([])
-              
+              // Restablecer todos los campos y estados
+              setNewProduct({ name: '', description: '', price: 0, visible: false, order: 0, features: [], applications: [], characteristics: [], unit_size: '', measurement_type: '', measurement_unit: '', measurement_type_other: '', measurement_unit_other: '', stock: 0, manufacturer: '', supplier: '', _file: null });
+              setCharRows([]);
+              setAppRows([]);
+              setUnitSizeInputs(['']);
+              setDescriptionInputs(['']);
+              setSupplierSelected(null);
+              setSupplierQuery('');
+              setShowSupplierDetails(false);
+              setSelectedExistingImages([]);
+              setNewFiles([]);
+              setNewProductPriceDisplay('');
+              if (setSearchQuery) setSearchQuery('');
+
+              // Mostrar alerta con mensaje actualizado
               if (errors.length === 0 && created > 0) {
-                // Mostrar modal para añadir productos a la cotización
-                // setShowAddToQuoteModal(true) // Eliminada porque la variable no existe
-                setAlert({ type: 'success', message: created > 1 ? `Se crearon ${created} productos.` : 'Producto creado exitosamente.' })
+                setAlert({ type: 'success', message: created > 1 ? `Se crearon ${created} productos y se añadieron a la lista.` : 'Producto creado y añadido a la lista.' });
               } else if (created > 0) {
-                setAlert({ type: 'error', message: `Se crearon ${created}, con errores en ${errors.length}: ${errors.slice(0, 3).join(' · ')}${errors.length > 3 ? '…' : ''}` })
+                setAlert({ type: 'error', message: `Se crearon ${created}, con errores en ${errors.length}: ${errors.slice(0, 3).join(' · ')}${errors.length > 3 ? '…' : ''}` });
               } else {
-                setAlert({ type: 'error', message: `No se creó ningún producto: ${errors.slice(0, 3).join(' · ')}${errors.length > 3 ? '…' : ''}` })
+                setAlert({ type: 'error', message: `No se creó ningún producto: ${errors.slice(0, 3).join(' · ')}${errors.length > 3 ? '…' : ''}` });
               }
             } catch (error) {
-              console.error('Create error', error)
-              setAlert({ type: 'error', message: `Error creando producto${error instanceof Error && error.message ? `: ${error.message}` : ''}` })
+              console.error('Create error', error);
+              setAlert({ type: 'error', message: `Error creando producto${error instanceof Error && error.message ? `: ${error.message}` : ''}` });
             } finally {
-              setCreating(false)
+              setCreating(false);
             }
           }}
-          className="px-4 py-2 bg-red-600 text-white rounded"
+          className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded"
         >
           {creating ? 'Creando...' : 'Crear producto'}
         </button>
         <button
           type="button"
           onClick={() => {
-            setNewProduct({ name: '', description: '', price: 0, visible: false, order: 0, features: [], applications: [], characteristics: [], unit_size: '', measurement_type: '', measurement_unit: '', measurement_type_other: '', measurement_unit_other: '', stock: 0, manufacturer: '', supplier: '', _file: null })
-            setCharRows([])
-            setAppRows([])
-            setUnitSizeInputs([''])
-            setDescriptionInputs([''])
-            setSupplierSelected(null)
-            setSupplierQuery('')
-            setShowSupplierDetails(false)
-            setSelectedExistingImages([])
-            setNewFiles([])
-            setShowMatches(false)
-            setShowCreateForm(false)
+            setNewProduct({ name: '', description: '', price: 0, visible: false, order: 0, features: [], applications: [], characteristics: [], unit_size: '', measurement_type: '', measurement_unit: '', measurement_type_other: '', measurement_unit_other: '', stock: 0, manufacturer: '', supplier: '', _file: null });
+            setCharRows([]);
+            setAppRows([]);
+            setUnitSizeInputs(['']);
+            setDescriptionInputs(['']);
+            setSupplierSelected(null);
+            setSupplierQuery('');
+            setShowSupplierDetails(false);
+            setSelectedExistingImages([]);
+            setNewFiles([]);
+            setShowMatches(false);
+            setNewProductPriceDisplay('');
+            // No cerrar el modal ni cambiar setShowCreateForm
           }}
           className="px-4 py-2 bg-gray-100 text-gray-800 rounded hover:bg-gray-200"
         >
-          Cancelar
+          Limpiar
         </button>
       </div>
     </div>

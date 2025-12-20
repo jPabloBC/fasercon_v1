@@ -4,8 +4,10 @@ import Navbar from '@/components/Navbar';
 import Footer from '@/components/Footer';
 import { useState, useEffect } from 'react';
 import PhoneInput, { isValidPhoneNumber } from 'react-phone-number-input';
+import { State, City, Country } from 'country-state-city';
 import { ArrowLeftIcon, ArrowRightIcon, TrashIcon } from '@heroicons/react/24/outline';
 import Image from 'next/image'
+import { formatCLP } from '@/lib/format'
 
 type StoredQuoteItem = { 
   id: string | number; 
@@ -30,6 +32,7 @@ type Product = {
   measurement_unit?: string | null
   characteristics?: string[]
   sku?: string | null
+  visible?: boolean | null
 }
 
 // productos cargados desde la API
@@ -43,6 +46,10 @@ export default function QuotePage() {
   // Estado para productos y productos en orden aleatorio
   const [products, setProducts] = useState<Product[]>(initialProducts)
   const [randomizedProducts, setRandomizedProducts] = useState<Product[]>([])
+
+  // Filtrar productos públicos
+  const publicProducts = Array.isArray(products) ? products.filter(p => p.visible === true) : []
+  const publicRandomizedProducts = Array.isArray(randomizedProducts) ? randomizedProducts.filter(p => p.visible === true) : []
   const [selected, setSelected] = useState(null as null | Product);
   const [qty, setQty] = useState(1);
   const [contact, setContact] = useState({
@@ -51,7 +58,13 @@ export default function QuotePage() {
     email: '',
     phone: '',
     address: '',
-    contactName: ''
+    contactName: '',
+    document: '',
+    country: 'CL',
+    region: '',
+    city: '',
+    postal_code: '',
+    notes: ''
   })
   const [errors, setErrors] = useState<{
     rut?: string;
@@ -60,15 +73,40 @@ export default function QuotePage() {
     phone?: string;
     address?: string;
     contactName?: string;
+    country?: string;
+    region?: string;
+    city?: string;
   }>({})
+  const [regionList, setRegionList] = useState<any[]>([]);
+  const [cityList, setCityList] = useState<any[]>([]);
+  const [countryList, setCountryList] = useState<any[]>([]);
+  useEffect(() => {
+    try {
+      const states = State.getStatesOfCountry(contact.country || 'CL') || [];
+      setRegionList(states);
+      setCityList([]);
+    } catch {
+      setRegionList([]);
+      setCityList([]);
+    }
+  }, [contact.country]);
+
+  useEffect(() => {
+    try {
+      const countries = Country.getAllCountries() || [];
+      // Map to simple shape { code, name }
+      const mapped = countries.map((c: any) => ({ code: c.isoCode, name: c.name }));
+      setCountryList(mapped);
+    } catch {
+      setCountryList([]);
+    }
+  }, []);
   const [submitting, setSubmitting] = useState(false)
   const [, setSubmitMessage] = useState<string | null>(null)
-  const filtered = Array.isArray(products)
-    ? products.filter(p =>
-        (p.name || '').toLowerCase().includes(search.toLowerCase()) ||
-        (p.description || '').toLowerCase().includes(search.toLowerCase())
-      )
-    : [];
+  const filtered = publicProducts.filter(p =>
+    (p.name || '').toLowerCase().includes(search.toLowerCase()) ||
+    (p.description || '').toLowerCase().includes(search.toLowerCase())
+  )
   // El producto mostrado depende solo del buscador o selección manual
   const shownProduct = search ? filtered[0] : selected;
   // Resetear cantidad cuando cambia el producto
@@ -77,7 +115,7 @@ export default function QuotePage() {
   // On mount: load saved quote from localStorage and fetch product details
   useEffect(() => {
     let mounted = true
-    fetch('/api/products')
+    fetch('/api/products?public=true')
       .then(r => r.json())
       .then((data) => {
         if (!mounted) return
@@ -223,8 +261,8 @@ export default function QuotePage() {
           </button>
           <div className="flex gap-4 px-8 overflow-x-auto scrollbar-hide">
             {/* El ancho de cada tarjeta se reduce para mostrar más productos a la vez */}
-            {Array.isArray(randomizedProducts) &&
-              randomizedProducts
+            {Array.isArray(publicRandomizedProducts) &&
+              publicRandomizedProducts
                 .filter((product, index, self) => index === self.findIndex(p => p.name === product.name))
                 .map((product) => (
                   <a
@@ -259,8 +297,8 @@ export default function QuotePage() {
             type="text"
             placeholder="Buscar producto..."
             value={search}
-            onChange={e => {
-              setSearch(e.target.value);
+            onChange={({ target }) => {
+              setSearch(target.value);
               setSelected(null);
             }}
             className="w-[50vw] max-w-xl px-4 py-2 text-base border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 shadow"
@@ -303,7 +341,7 @@ export default function QuotePage() {
                   <div className="flex items-center gap-2">
                     <span className="text-gray-600">Cantidad:</span>
                     <button type="button" className="px-2 py-1 rounded bg-gray-200 hover:bg-gray-300 text-lg font-bold" onClick={() => setQty(q => Math.max(1, q - 1))}>-</button>
-                    <input type="number" min={1} value={qty} onChange={e => setQty(Math.max(1, Number(e.target.value)))} className="w-14 text-center border rounded px-2 py-1 no-spinner" />
+                    <input type="number" min={1} value={qty} onChange={({ target }) => setQty(Math.max(1, Number(target.value)))} className="w-14 text-center border rounded px-2 py-1 no-spinner" />
 
 <style jsx global>{`
   input[type=number].no-spinner::-webkit-inner-spin-button,
@@ -402,8 +440,8 @@ export default function QuotePage() {
                   <input
                     id="company"
                     value={contact.company}
-                    onChange={(e) => {
-                      setContact(c => ({ ...c, company: e.target.value }))
+                    onChange={({ target }) => {
+                      setContact(c => ({ ...c, company: target.value }))
                       setErrors(prev => ({ ...prev, company: undefined }))
                     }}
                     placeholder="Ejemplo: Fasercon Ltda."
@@ -417,8 +455,8 @@ export default function QuotePage() {
                   <input
                     id="rut"
                     value={contact.rut}
-                    onChange={(e) => {
-                      const val = e.target.value
+                    onChange={({ target }) => {
+                      const val = target.value
                       setContact(c => ({ ...c, rut: val }))
                       setErrors(prev => ({ ...prev, rut: undefined }))
                     }}
@@ -447,6 +485,64 @@ export default function QuotePage() {
                     className={`border px-3 py-2 rounded-lg shadow-sm w-full bg-white focus:ring-2 focus:ring-red-500 focus:outline-none ${errors.address ? 'border-red-500' : 'border-gray-300'}`}
                   />
                   {errors.address && <p className="text-sm text-red-600 mt-1">{errors.address}</p>}
+                </div>
+                {/* País / Región / Ciudad */}
+                <div>
+                  <label htmlFor="country" className="block text-sm font-medium text-gray-700">País</label>
+                  <select
+                    id="country"
+                    value={contact.country}
+                    onChange={(e) => {
+                      const country = e.target.value;
+                      setContact(c => ({ ...c, country, region: '', city: '' }));
+                      setErrors(prev => ({ ...prev, country: undefined, region: undefined, city: undefined }));
+                      const states = State.getStatesOfCountry(country) || [];
+                      setRegionList(states);
+                      setCityList([]);
+                    }}
+                    className={`border px-3 py-2 rounded-lg shadow-sm w-full bg-white focus:ring-2 focus:ring-red-500 focus:outline-none ${errors.country ? 'border-red-500' : 'border-gray-300'}`}
+                  >
+                    {countryList.map((cn: any) => (
+                      <option key={cn.code} value={cn.code}>{cn.name}</option>
+                    ))}
+                  </select>
+                  {errors.country && <p className="text-sm text-red-600 mt-1">{errors.country}</p>}
+                </div>
+                <div>
+                  <label htmlFor="region" className="block text-sm font-medium text-gray-700">Región / Departamento</label>
+                  <select
+                    id="region"
+                    value={contact.region}
+                    onChange={(e) => {
+                      const region = e.target.value;
+                      setContact(c => ({ ...c, region, city: '' }));
+                      setErrors(prev => ({ ...prev, region: undefined, city: undefined }));
+                      const cities = City.getCitiesOfState(contact.country || 'CL', region) || [];
+                      setCityList(cities || []);
+                    }}
+                    className={`border px-3 py-2 rounded-lg shadow-sm w-full bg-white focus:ring-2 focus:ring-red-500 focus:outline-none ${errors.region ? 'border-red-500' : 'border-gray-300'}`}
+                  >
+                    <option value="">Seleccione región</option>
+                    {regionList.map(r => (
+                      <option key={r.isoCode || r.iso2} value={r.isoCode || r.iso2}>{r.name}</option>
+                    ))}
+                  </select>
+                  {errors.region && <p className="text-sm text-red-600 mt-1">{errors.region}</p>}
+                </div>
+                <div>
+                  <label htmlFor="city" className="block text-sm font-medium text-gray-700">Ciudad / Comuna</label>
+                  <select
+                    id="city"
+                    value={contact.city}
+                    onChange={(e) => { setContact(c => ({ ...c, city: e.target.value })); setErrors(prev => ({ ...prev, city: undefined })); }}
+                    className={`border px-3 py-2 rounded-lg shadow-sm w-full bg-white focus:ring-2 focus:ring-red-500 focus:outline-none ${errors.city ? 'border-red-500' : 'border-gray-300'}`}
+                  >
+                    <option value="">Seleccione ciudad</option>
+                    {cityList.map(ct => (
+                      <option key={ct.isoCode || ct.name} value={ct.name}>{ct.name}</option>
+                    ))}
+                  </select>
+                  {errors.city && <p className="text-sm text-red-600 mt-1">{errors.city}</p>}
                 </div>
                 {/* Contacto (Nombre de persona de contacto) */}
                 <div>
@@ -499,6 +595,16 @@ export default function QuotePage() {
                   />
                   {errors.phone && <p className="text-sm text-red-600 mt-1">{errors.phone}</p>}
                 </div>
+                {/* Postal code */}
+                <div>
+                  <label htmlFor="postal_code" className="block text-sm font-medium text-gray-700">Código Postal (opcional)</label>
+                  <input id="postal_code" value={contact.postal_code} onChange={(e) => setContact(c => ({ ...c, postal_code: e.target.value }))} placeholder="Ej: 7500000" className="border px-3 py-2 rounded-lg shadow-sm w-full bg-white focus:ring-2 focus:ring-red-500 focus:outline-none border-gray-300" />
+                </div>
+                {/* Notes */}
+                <div>
+                  <label htmlFor="notes" className="block text-sm font-medium text-gray-700">Notas (opcional)</label>
+                  <textarea id="notes" value={contact.notes} onChange={(e) => setContact(c => ({ ...c, notes: e.target.value }))} placeholder="Notas adicionales" className="border px-3 py-2 rounded-lg shadow-sm w-full bg-white focus:ring-2 focus:ring-red-500 focus:outline-none border-gray-300" />
+                </div>
                 </div>
               </div>
             </div>
@@ -529,7 +635,7 @@ export default function QuotePage() {
                         <td className="py-3 px-2">
                           <div className="font-medium text-gray-900">{item.name}</div>
                           {prod?.price && (
-                            <div className="text-sm text-gray-500">Precio: ${prod.price.toLocaleString()}</div>
+                            <div className="text-sm text-gray-500">Precio: ${formatCLP(prod.price)}</div>
                           )}
                         </td>
                         <td className="py-3 px-2 text-sm text-gray-600 max-w-xs">
@@ -629,6 +735,11 @@ export default function QuotePage() {
                     else if (!emailRegex.test(contact.email)) nextErrors.email = 'Correo inválido';
                     if (!contact.phone.trim()) nextErrors.phone = 'Teléfono es requerido';
                     else if (!isValidPhoneNumber(contact.phone)) nextErrors.phone = 'Teléfono inválido';
+                    if (!contact.address || !contact.address.trim()) nextErrors.address = 'Dirección es requerida';
+                    if (!contact.contactName || !contact.contactName.trim()) nextErrors.contactName = 'Nombre de contacto es requerido';
+                    if (!contact.country || !contact.country.trim()) nextErrors.country = 'País es requerido';
+                    if (!contact.region || !contact.region.trim()) nextErrors.region = 'Región es requerida';
+                    if (!contact.city || !contact.city.trim()) nextErrors.city = 'Ciudad es requerida';
 
                     if (Object.keys(nextErrors).length > 0) {
                       setErrors(nextErrors);
@@ -664,11 +775,17 @@ export default function QuotePage() {
                     const payload = {
                       contact: {
                         rut: rutToSend,
+                        document: contact.rut || contact.document || '',
                         company: contact.company.trim(),
                         email: contact.email.trim(),
                         phone: contact.phone,
                         company_address: contact.address || '',
                         contact_name: contact.contactName || '',
+                        country: contact.country || '',
+                        region: contact.region || '',
+                        city: contact.city || '',
+                        postal_code: contact.postal_code || '',
+                        notes: contact.notes || '',
                       },
                       items: itemsPayload,
                     };
@@ -764,8 +881,8 @@ export default function QuotePage() {
           <h2 className="text-lg font-bold mb-1 text-center">{product.name}</h2>
           {product.description && <p className="text-gray-700 text-sm mb-2 text-center">{product.description}</p>}
           <div className="text-xs text-gray-500 mb-2">Unidad:
-            <input className="ml-2 border rounded px-2 py-1 w-20" value={unit} onChange={e => setUnit(e.target.value)} />
-            <input className="ml-2 border rounded px-2 py-1 w-20" value={measure} onChange={e => setMeasure(e.target.value)} />
+            <input className="ml-2 border rounded px-2 py-1 w-20" value={unit} onChange={({ target }) => setUnit(target.value)} />
+            <input className="ml-2 border rounded px-2 py-1 w-20" value={measure} onChange={({ target }) => setMeasure(target.value)} />
           </div>
           {product.characteristics && product.characteristics.length > 0 && (
             <div className="mb-2 flex flex-col items-center">
@@ -776,8 +893,8 @@ export default function QuotePage() {
                     <input
                       type="checkbox"
                       checked={selectedChars.includes(c)}
-                      onChange={e => {
-                        setSelectedChars(prev => e.target.checked ? [...prev, c] : prev.filter(x => x !== c));
+                      onChange={({ target }) => {
+                        setSelectedChars(prev => target.checked ? [...prev, c] : prev.filter(x => x !== c));
                       }}
                     />
                     {c}

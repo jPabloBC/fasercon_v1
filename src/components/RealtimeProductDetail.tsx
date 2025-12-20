@@ -102,9 +102,19 @@ export default function RealtimeProductDetail({ initialProduct, initialVariants 
 
   const refreshByName = React.useCallback(async (name: string) => {
     try {
-      const res = await fetch(`/api/products?name=${encodeURIComponent(name)}`, { cache: 'no-store' })
+      const res = await fetch(`/api/products?name=${encodeURIComponent(name)}&public=true`, { cache: 'no-store' })
       const json = await res.json()
       const rows = Array.isArray(json?.products) ? (json.products as DBRow[]) : []
+      
+      // Check if current product is still visible
+      const currentProductExists = rows.some((r) => String(r.id) === productId)
+      
+      if (!currentProductExists) {
+        // Product is no longer visible (visible: false or deleted)
+        setMissing(true)
+        return
+      }
+      
       if (rows.length === 0) {
         setMissing(true)
         return

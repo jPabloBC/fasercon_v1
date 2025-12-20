@@ -53,19 +53,47 @@ export async function GET(request: NextRequest) {
         ];
         const orExpr = textFields.map((f) => `${f}.ilike.${ilikeQ}`).join(',');
 
-        const { data, error } = await supabaseAdmin
+        // Query 1: Search text fields
+        const { data: textResults, error: textError } = await supabaseAdmin
           .from('fasercon_products')
           .select('*')
           .or(orExpr)
           .order('order', { ascending: true })
           .limit(1000);
 
-        if (error) {
-          console.error('Error buscando productos (q):', error)
+        if (textError) {
+          console.error('Error buscando productos (q):', textError)
           return NextResponse.json({ error: 'Error al buscar productos' }, { status: 500 })
         }
 
-        const products = (data || []).map((product) => {
+        // Query 2: Fetch a limited set to search by UUID substring (server-side filter)
+        // Only do this if query looks like it could be part of a UUID (hex chars, dashes)
+        let idResults: any[] = [];
+        const looksLikeUuidPart = /^[0-9a-f-]+$/i.test(q.trim());
+        if (looksLikeUuidPart) {
+          const { data: allProducts } = await supabaseAdmin
+            .from('fasercon_products')
+            .select('id, name, sku, description, image_url, price, unit_size, measurement_unit, manufacturer, characteristics, order')
+            .limit(5000);
+          
+          if (allProducts) {
+            const qLower = q.trim().toLowerCase();
+            idResults = allProducts.filter((p: any) => 
+              p.id && p.id.toLowerCase().includes(qLower)
+            );
+          }
+        }
+
+        // Merge results and deduplicate by id
+        const allResults = [...(textResults || []), ...idResults];
+        const seen = new Set<string>();
+        const uniqueResults = allResults.filter(p => {
+          if (seen.has(p.id)) return false;
+          seen.add(p.id);
+          return true;
+        });
+
+        const products = (uniqueResults || []).map((product) => {
           if (product.unit_size && !isNaN(product.unit_size)) {
             const decimalValue = parseFloat(product.unit_size)
             product.unit_size = decimalToFraction(decimalValue)
@@ -99,7 +127,10 @@ export async function GET(request: NextRequest) {
       if (name) {
         query.ilike('name', `%${name}%`)
       }
-      // Nota: por ahora no filtramos por "visible" para que el catálogo no se quede vacío.
+      // Filtrar solo productos públicos cuando se solicita desde páginas públicas
+      if (publicOnly === 'true') {
+        query.eq('visible', true)
+      }
 
       const { data, error } = await query.order('order', { ascending: true }).limit(1000)
 
@@ -255,6 +286,7 @@ export async function PATCH(request: NextRequest) {
   if (updates.measurement_type_other !== undefined) toUpdate.measurement_type_other = updates.measurement_type_other
   if (updates.measurement_unit_other !== undefined) toUpdate.measurement_unit_other = updates.measurement_unit_other
   if (updates.unit_size !== undefined) toUpdate.unit_size = updates.unit_size
+  if (updates.type !== undefined) toUpdate.type = updates.type
     toUpdate.updated_at = new Date().toISOString()
 
     // Handle supplier update: allow client to send supplier as object {id,..}, as string (name), or empty to unlink

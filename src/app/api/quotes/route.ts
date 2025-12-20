@@ -39,6 +39,11 @@ const preSaleSchema = z.object({
     document: z.string().optional().nullable(),
     company_address: z.string().min(1, 'La dirección de la empresa es requerida'),
     contact_name: z.string().min(1, 'El nombre de contacto es requerido'),
+    country: z.string().optional().nullable(),
+    region: z.string().optional().nullable(),
+    city: z.string().optional().nullable(),
+    postal_code: z.string().optional().nullable(),
+    notes: z.string().optional().nullable(),
   }),
   items: z.array(itemSchema).min(1, 'Debes agregar al menos un producto'),
 })
@@ -88,7 +93,39 @@ export async function GET() {
           if (!prodErr && Array.isArray(products)) {
             productsById = products.reduce((acc, p) => { acc[p.id] = p; return acc }, {} as Record<string, unknown>)
           }
+
+          // For any product_ids not found in fasercon_products, try fetching them from fasercon_quote_services
+          const remainingIds = productIds.filter(id => !productsById[String(id)]);
+          if (remainingIds.length > 0) {
+            try {
+              const { data: services, error: servErr } = await supabase
+                .from('fasercon_quote_services')
+                .select('*')
+                .in('id', remainingIds);
+              if (!servErr && Array.isArray(services)) {
+                // Map services into productsById under the same id so frontend can read item.product uniformly
+                services.forEach((s: any) => {
+                  // Normalize service fields to match Product shape used by frontend
+                  const mapped = {
+                    id: s.id,
+                    sku: s.sku ?? null,
+                    name: s.title ?? s.name ?? null,
+                    characteristics: s.characteristics ?? (s.metadata?.characteristics ?? []) ?? [],
+                    unit_size: s.unit ?? null,
+                    measurement_unit: s.unit_measure ?? null,
+                    image_url: s.image_url ?? (Array.isArray(s.images) ? s.images[0] : null) ?? null,
+                    // preserve original service object as well in case other fields are needed
+                    _service: s,
+                  };
+                  productsById[String(s.id)] = mapped;
+                });
+              }
+            } catch (e) {
+              console.warn('Failed to fetch quote services for items:', e);
+            }
+          }
         }
+
         itemsByQuote = items.reduce((acc, item) => {
           // Parsear characteristics si es string
           let characteristics = item.characteristics;
@@ -99,8 +136,8 @@ export async function GET() {
               characteristics = [];
             }
           }
-          // Adjuntar datos completos del producto si existen y tipar correctamente
-          let product = productsById[item.product_id] || null;
+          // Adjuntar datos completos del producto o servicio si existen y tipar correctamente
+          let product = productsById[String(item.product_id)] || null;
           if (product && typeof product === 'object') {
             const prodTyped = product as Product;
             if (typeof prodTyped.characteristics === 'string') {
@@ -129,6 +166,11 @@ export async function GET() {
       estimatedPrice: quote.estimated_price,
       status: quote.status,
       createdAt: quote.created_at,
+      quote_number: quote.quote_number,
+      correlative: quote.correlative,
+      description: quote.description,
+      execution_time: quote.execution_time || null,
+      payment_method: quote.payment_method || null,
       items: itemsByQuote[quote.id] || []
     }))
 
@@ -159,14 +201,33 @@ export async function POST(request: NextRequest) {
     async function computeNextCorrelative() {
       let correlativeNext = '0001';
       try {
-        const { data: quotesCorrelatives } = await supabase
+          // First, check for a one-time override stored in DB (atomicity is best-effort here).
+          try {
+            const { data: override, error: ovErr } = await supabase
+              .from('fasercon_sequence_overrides')
+              .select('name,next')
+              .eq('name', 'quotes')
+              .limit(1)
+              .maybeSingle();
+            if (!ovErr && override && typeof override.next === 'number') {
+              // consume the override so it's only used once
+              await supabase.from('fasercon_sequence_overrides').delete().eq('name', 'quotes');
+              return String(override.next).padStart(4, '0');
+            }
+          } catch (ovEx) {
+            console.warn('Failed to read sequence override:', ovEx);
+          }
+        // Check both quote_number and correlative columns to find the highest existing number
+        const { data: quotesData } = await supabase
           .from('fasercon_quotes')
-          .select('correlative');
+          .select('correlative, quote_number');
         const { data: versionsCorrelatives } = await supabase
           .from('fasercon_quote_versions')
           .select('correlative');
         const all = [] as Array<string | null | undefined>;
-        if (Array.isArray(quotesCorrelatives)) all.push(...quotesCorrelatives.map((r: { correlative: string }) => r.correlative));
+        if (Array.isArray(quotesData)) {
+          all.push(...quotesData.map((r: { correlative?: string; quote_number?: string }) => r.quote_number || r.correlative));
+        }
         if (Array.isArray(versionsCorrelatives)) all.push(...versionsCorrelatives.map((r: { correlative: string }) => r.correlative));
         let maxNum = 0;
         // Only consider existing correlative values that are exactly 4 digits (e.g. 0001)
@@ -178,6 +239,7 @@ export async function POST(request: NextRequest) {
             if (!isNaN(n) && n > maxNum) maxNum = n;
           }
         }
+        // Use computed sequential next value from DB scans (no env-var fallback)
         correlativeNext = String(maxNum + 1).padStart(4, '0');
       } catch (err) {
         console.warn('Failed to compute next correlative, defaulting to 0001', err);
@@ -196,6 +258,11 @@ export async function POST(request: NextRequest) {
         document: z.string().optional().nullable(),
         company_address: z.string().optional().nullable(),
         contact_name: z.string().optional().nullable(),
+        country: z.string().optional().nullable(),
+        region: z.string().optional().nullable(),
+        city: z.string().optional().nullable(),
+        postal_code: z.string().optional().nullable(),
+        notes: z.string().optional().nullable(),
       }).optional();
 
       const draftItemSchema = z.object({
@@ -246,6 +313,9 @@ export async function POST(request: NextRequest) {
             document: contact.rut || contact.document || null,
             company_address: contact.company_address || null,
             contact_name: contact.contact_name || null,
+              description: body.description || null,
+              execution_time: body.execution_time || null,
+              payment_method: body.payment_method || null,
           },
         ])
         .select()
@@ -263,24 +333,36 @@ export async function POST(request: NextRequest) {
       let itemsSaved = 0;
       if (items.length > 0) {
         console.log('[DEBUG] Draft items payload (raw):', items);
-        const rows = items.map(it => ({
-          quote_id: inserted.id,
-          product_id: it.product_id ?? null,
-          name: it.name ?? null,
-          image_url: it.image_url ?? null,
-          unit_size: it.unit_size ?? null,
-          measurement_unit: it.measurement_unit ?? null,
-          qty: Number(it.qty) || 0,
-          price: Number(it.price) || 0,
-          update_price: typeof it.update_price === 'number' ? it.update_price : (it.update_price != null ? Number(it.update_price) : (typeof it.price === 'number' ? it.price : 0)),
-          discount: typeof it.discount === 'number' ? it.discount : (it.discount != null ? Number(it.discount) : 0),
-          company: contact.company || null,
-          email: contact.email || null,
-          phone: contact.phone || null,
-          document: contact.rut || contact.document || null,
-          company_address: contact.company_address || null,
-          contact_name: contact.contact_name || null,
-        }));
+        const rows = items.map(it => {
+          // Support items originating from fasercon_quote_services (title, images, unit, unit_measure)
+          const candidateId = it.product_id ?? (it as any).id ?? null;
+          const name = it.name ?? (it as any).title ?? null;
+          const imageUrl = it.image_url ?? (Array.isArray((it as any).images) && (it as any).images.length ? (it as any).images[0] : null) ?? null;
+          const unitSize = it.unit_size ?? (it as any).unit ?? null;
+          const measurementUnit = it.measurement_unit ?? (it as any).unit_measure ?? null;
+          const qty = Number(it.qty) || 0;
+          const price = it.price != null ? Number(it.price) : 0;
+          const updatePrice = typeof it.update_price === 'number' ? it.update_price : (it.update_price != null ? Number(it.update_price) : (typeof it.price === 'number' ? it.price : 0));
+          const discount = typeof it.discount === 'number' ? it.discount : (it.discount != null ? Number(it.discount) : 0);
+          return {
+            quote_id: inserted.id,
+            product_id: candidateId,
+            name,
+            image_url: imageUrl,
+            unit_size: unitSize,
+            measurement_unit: measurementUnit,
+            qty,
+            price,
+            update_price: updatePrice,
+            discount,
+            company: contact.company || null,
+            email: contact.email || null,
+            phone: contact.phone || null,
+            document: contact.rut || contact.document || null,
+            company_address: contact.company_address || null,
+            contact_name: contact.contact_name || null,
+          };
+        });
         console.log('[DEBUG] Draft rows to insert:', rows);
 
         try {
@@ -315,14 +397,109 @@ export async function POST(request: NextRequest) {
       // Normalize contact name capitalization
       contact.contact_name = capitalizeName(contact.contact_name || '')
 
+      // Handle client record: UPDATE if client_id exists, INSERT/UPSERT if new
+      const clientId = body.client_id || null;
+      try {
+        const clientRow: Record<string, unknown> = {
+          company: contact.company || null,
+          contact_name: contact.contact_name || null,
+          email: contact.email || null,
+          phone: contact.phone || null,
+          document: contact.rut || contact.document || null,
+          company_address: contact.company_address || null,
+          country: contact.country || null,
+          region: contact.region || null,
+          city: contact.city || null,
+          postal_code: contact.postal_code || null,
+          notes: contact.notes || null,
+          is_active: true,
+        };
+
+        const clientDb = process.env.SUPABASE_SERVICE_ROLE_KEY ? supabaseAdmin : supabase;
+        
+        if (clientId) {
+          // Cliente existente: hacer UPDATE para evitar duplicación
+          try {
+            const { data: updatedClient, error: updateErr } = await clientDb
+              .from('fasercon_clients')
+              .update(clientRow)
+              .eq('id', clientId)
+              .select()
+              .maybeSingle();
+            if (updateErr) {
+              console.warn('Warning: failed to update existing client:', updateErr);
+            } else {
+              console.log('Updated existing client:', updatedClient?.id ?? updatedClient);
+            }
+          } catch (updateEx) {
+            console.error('Exception updating existing client:', updateEx);
+          }
+        } else {
+          // Cliente nuevo: intentar upsert solo cuando tenemos email o documento
+          if (clientRow.email || clientRow.document) {
+            const onConflict = clientRow.email ? 'email' : 'document';
+            try {
+              const { data: upsertedClient, error: clientErr } = await clientDb
+                .from('fasercon_clients')
+                .upsert([clientRow], { onConflict })
+                .select()
+                .maybeSingle();
+              if (clientErr) {
+                console.warn('Warning: failed to upsert client into fasercon_clients:', clientErr);
+              }
+              if (upsertedClient && (upsertedClient.id || upsertedClient.email)) {
+                console.log('Upserted client:', upsertedClient?.id ?? upsertedClient);
+              } else {
+                // Fallback: try insert (use admin client if available)
+                try {
+                  const insertDb = process.env.SUPABASE_SERVICE_ROLE_KEY ? supabaseAdmin : supabase;
+                  const { data: insertedClient, error: insertErr } = await insertDb
+                    .from('fasercon_clients')
+                    .insert([clientRow])
+                    .select()
+                    .maybeSingle();
+                  if (insertErr) {
+                    console.warn('Fallback insert into fasercon_clients failed:', insertErr);
+                  } else {
+                    console.log('Inserted client via fallback:', insertedClient?.id ?? insertedClient);
+                  }
+                } catch (insEx) {
+                  console.error('Exception during fallback client insert:', insEx);
+                }
+              }
+            } catch (upsertEx) {
+              console.error('Exception upserting client:', upsertEx);
+              // Try fallback insert
+              try {
+                const insertDb = process.env.SUPABASE_SERVICE_ROLE_KEY ? supabaseAdmin : supabase;
+                const { data: insertedClient, error: insertErr } = await insertDb
+                  .from('fasercon_clients')
+                  .insert([clientRow])
+                  .select()
+                  .maybeSingle();
+                if (insertErr) {
+                  console.warn('Fallback insert into fasercon_clients failed:', insertErr);
+                } else {
+                  console.log('Inserted client via fallback after exception:', insertedClient?.id ?? insertedClient);
+                }
+              } catch (insEx) {
+                console.error('Exception during fallback client insert after upsert error:', insEx);
+              }
+            }
+          } else {
+            console.log('Skipping client upsert: no email or document provided in contact payload');
+          }
+        }
+      } catch (upsertErr) {
+        console.error('Exception handling client record:', upsertErr);
+      }
+
       console.log('Parsed contact:', contact)
       console.log('Parsed items:', items)
 
       // Crear o actualizar la cotización principal. Si el cliente envía
       // `parent_quote_id` or `parent_correlative` indicates a resend
       // and the existing row will be updated (saving a new version in the versions table).
-      const correlativeNext = await computeNextCorrelative();
-      const quote_number = correlativeNext;
 
       let quote: Record<string, unknown> | null = null;
       let isNew = false;
@@ -352,8 +529,7 @@ export async function POST(request: NextRequest) {
             phone: contact.phone,
             document: contact.rut || contact.document || null,
             company_address: contact.company_address || null,
-            contact_name: contact.contact_name || null,
-            quote_number: quote_number,
+            // IMPORTANT: do NOT update contact_name when sending; preserve original contact_name
             status: newStatus,
             admin_notes: adminNotes,
           })
@@ -389,65 +565,112 @@ export async function POST(request: NextRequest) {
           quote = updatedQuote;
         }
       } else {
-        // Insertar nueva cotización
+        // Insertar nueva cotización con reintentos si el `quote_number` ya existe
         const newStatus = 'PENDING'
         const adminNotes = body.draft ? JSON.stringify({ draft: true, savedAt: new Date().toISOString() }) : null;
-        const { data: inserted, error: qErr } = await supabase
-          .from('fasercon_quotes')
-          .insert([
-            {
-              name: contact.company,
-              email: contact.email,
-              phone: contact.phone,
-              width: 1,
-              length: 1,
-              area: 1,
-              material_type: 'PRE-SALE',
-              estimated_price: 0,
-              status: newStatus,
-              admin_notes: adminNotes,
-              quote_number: quote_number,
-              document: contact.rut || contact.document || null,
-              company_address: contact.company_address || null,
-              contact_name: contact.contact_name || null,
+        let inserted: Record<string, unknown> | null = null;
+        let insertErr: any = null;
+        const maxAttempts = 5;
+        for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+          try {
+            const tryQuoteNumber = await computeNextCorrelative();
+            console.log(`Attempting to insert quote with quote_number=${tryQuoteNumber} (attempt ${attempt}/${maxAttempts})`);
+            const res = await supabase
+              .from('fasercon_quotes')
+              .insert([
+                {
+                  name: contact.company,
+                  email: contact.email,
+                  phone: contact.phone,
+                  width: 1,
+                  length: 1,
+                  area: 1,
+                  material_type: 'PRE-SALE',
+                  estimated_price: 0,
+                  status: newStatus,
+                  admin_notes: adminNotes,
+                  correlative: tryQuoteNumber,
+                  document: contact.rut || contact.document || null,
+                  company_address: contact.company_address || null,
+                  contact_name: contact.contact_name || null,
+                  description: body.description || null,
+                  execution_time: body.execution_time || null,
+                  payment_method: body.payment_method || null,
+                }
+              ])
+              .select()
+              .single();
+            insertErr = res.error;
+            if (!insertErr && res.data) {
+              inserted = res.data;
+              if (inserted && typeof inserted === 'object' && 'id' in inserted) {
+                console.log('Inserted quote:', inserted.id);
+              } else {
+                console.log('Inserted quote:', inserted);
+              }
+              break;
             }
-          ])
-          .select()
-          .single();
-        if (qErr || !inserted) {
-          console.error('Error insertando cotización:', qErr)
+            // If unique constraint on quote_number, retry
+            if (insertErr && (insertErr.code === '23505' || String(insertErr.message).includes('duplicate key'))) {
+              console.warn('Duplicate quote_number detected, will retry to compute a new one. Error:', insertErr.message || insertErr);
+              // small delay to reduce race (non-blocking)
+              await new Promise((r) => setTimeout(r, 100 * attempt));
+              continue;
+            }
+            // Other errors: break and report
+            break;
+          } catch (ex) {
+            insertErr = ex;
+            console.error('Exception inserting quote (attempt ' + attempt + '):', ex);
+            await new Promise((r) => setTimeout(r, 100 * attempt));
+          }
+        }
+        if (!inserted) {
+          console.error('Error insertando cotización:', insertErr)
           return NextResponse.json({ message: 'Error al guardar la cotización' }, { status: 500 })
         }
         quote = inserted;
         isNew = true;
       }
 
-      // Try to insert items in fasercon_quote_items only when creating a new quote
+      // Insert items in fasercon_quote_items (append) — do not delete existing items
       let itemsSaved = 0
-      if (isNew && items.length > 0 && quote) {
-        const rows = items.map(it => ({
-          quote_id: quote.id,
-          product_id: it.product_id,
-          name: it.name,
-          image_url: it.image_url ?? null,
-          unit_size: it.unit_size ?? null,
-          measurement_unit: it.measurement_unit ?? null,
-          qty: it.qty,
-          price: it.price ?? 0,
-          update_price: typeof it.update_price === 'number' ? it.update_price : (it.update_price != null ? Number(it.update_price) : (typeof it.price === 'number' ? it.price : 0)),
-          discount: typeof it.discount === 'number' ? it.discount : (it.discount != null ? Number(it.discount) : 0),
-          // NO guardamos characteristics aquí - se obtienen desde fasercon_products
-          company: contact.company, // Add company data
-          email: contact.email,     // Add email data
-          phone: contact.phone,      // Add phone data
-          document: contact.rut || contact.document, // Ensure RUT/document is added
-          company_address: contact.company_address, // Uniformar: dirección en cada ítem
-          contact_name: contact.contact_name, // Uniformar: nombre contacto en cada ítem
-        }))
+      if (items.length > 0 && quote) {
+        const rows = items.map(it => {
+          const candidateId = it.product_id ?? (it as any).id ?? null;
+          // Support items originating from fasercon_quote_services (title, images, unit, unit_measure)
+          const name = it.name ?? (it as any).title ?? null;
+          const imageUrl = it.image_url ?? (Array.isArray((it as any).images) && (it as any).images.length ? (it as any).images[0] : null) ?? null;
+          const unitSize = it.unit_size ?? (it as any).unit ?? null;
+          const measurementUnit = it.measurement_unit ?? (it as any).unit_measure ?? null;
+          const qty = Number(it.qty) || 0;
+          const price = it.price != null ? Number(it.price) : 0;
+          const updatePrice = typeof it.update_price === 'number' ? it.update_price : (it.update_price != null ? Number(it.update_price) : (typeof it.price === 'number' ? it.price : 0));
+          const discount = typeof it.discount === 'number' ? it.discount : (it.discount != null ? Number(it.discount) : 0);
+          return {
+            quote_id: quote.id,
+            product_id: candidateId,
+            name,
+            image_url: imageUrl,
+            unit_size: unitSize,
+            measurement_unit: measurementUnit,
+            qty,
+            price,
+            update_price: updatePrice,
+            discount,
+            // NO guardamos characteristics ni sku aquí - se obtienen desde fasercon_products o fasercon_quote_services via product_id
+            company: contact.company, // Add company data
+            email: contact.email,     // Add email data
+            phone: contact.phone,      // Add phone data
+            document: contact.rut || contact.document, // Ensure RUT/document is added
+            company_address: contact.company_address, // Uniformar: dirección en cada ítem
+            contact_name: contact.contact_name, // Uniformar: nombre contacto en cada ítem
+          };
+        })
         console.log('[DEBUG] New quote rows to insert:', rows);
         // Determine which client to use for items insertion.
-        // For drafts we can use the regular supabase client; for final inserts prefer supabaseAdmin.
-        const clientForItems = body.draft ? supabase : supabaseAdmin;
+        // Use the admin client only when the service role key is present; otherwise fall back to the regular client.
+        const clientForItems = process.env.SUPABASE_SERVICE_ROLE_KEY ? supabaseAdmin : supabase;
 
         // Ensure quote_id is present for fasercon_quote_items
         if (!quote.id) {
@@ -473,39 +696,63 @@ export async function POST(request: NextRequest) {
         } catch (insertEx) {
           console.error('Excepción al insertar items:', insertEx)
         }
-      } else if (!isNew) {
-        // When updating/resending an existing quote we intentionally DO NOT insert items
-        // to avoid duplicating rows in `fasercon_quote_items`. Existing items remain as-is.
-        console.log('Skipping items insertion for updated quote (avoiding duplicates).')
       }
 
-      // Enrich items with details from the database
-      const productIds = items.map(item => item.product_id);
-      const { data: products, error: productsError } = await supabase
-        .from('fasercon_products')
-        .select('id, sku, name, characteristics, unit_size, measurement_unit')
-        .in('id', productIds);
+      // Enrich items with details from the database (from both fasercon_products and fasercon_quote_services)
+      const productIds = items.filter(it => it.product_id).map(item => item.product_id);
+      let productsById = new Map();
+      let servicesById = new Map();
+      
+      // Fetch from fasercon_products
+      if (productIds.length > 0) {
+        const { data: products, error: productsError } = await supabase
+          .from('fasercon_products')
+          .select('id, sku, name, characteristics, unit_size, measurement_unit')
+          .in('id', productIds);
 
-      if (productsError) {
-        console.error('Error fetching products for quote:', productsError);
-        return NextResponse.json(
-          { message: 'Error al obtener detalles de los productos' },
-          { status: 500 }
-        );
+        if (!productsError && products) {
+          productsById = new Map(products.map(p => [String(p.id), p]));
+        }
       }
 
-      const productsById = new Map(products.map(p => [p.id, p]));
+      // Fetch from fasercon_quote_services (for items without product_id or with service IDs)
+      const serviceIds = items.filter(it => !it.product_id || !productsById.has(String(it.product_id))).map(item => item.product_id).filter(Boolean);
+      if (serviceIds.length > 0) {
+        const { data: services, error: servicesError } = await supabase
+          .from('fasercon_quote_services')
+          .select('id, sku, title, description, unit, unit_measure')
+          .in('id', serviceIds);
+
+        if (!servicesError && services) {
+          servicesById = new Map(services.map(s => [String(s.id), s]));
+        }
+      }
 
       const enrichedItems = items.map(item => {
-        const product = productsById.get(item.product_id);
-        return {
-          ...item,
-          sku: product?.sku ?? item.sku,
-          name: product?.name ?? item.name,
-          characteristics: product?.characteristics ?? item.characteristics,
-          unit_size: product?.unit_size ?? item.unit_size,
-          measurement_unit: product?.measurement_unit ?? item.measurement_unit,
-        };
+        const product = item.product_id ? productsById.get(String(item.product_id)) : null;
+        const service = item.product_id && !product ? servicesById.get(String(item.product_id)) : null;
+        
+        if (product) {
+          return {
+            ...item,
+            sku: product.sku ?? item.sku,
+            name: product.name ?? item.name,
+            characteristics: product.characteristics ?? item.characteristics,
+            unit_size: product.unit_size ?? item.unit_size,
+            measurement_unit: product.measurement_unit ?? item.measurement_unit,
+          };
+        } else if (service) {
+          return {
+            ...item,
+            sku: service.sku ?? item.sku,
+            name: service.title ?? item.name,
+            characteristics: (service as any).description ? [(service as any).description] : (item.characteristics ?? []),
+            unit_size: service.unit ?? item.unit_size,
+            measurement_unit: service.unit_measure ?? item.measurement_unit,
+          };
+        } else {
+          return item;
+        }
       });
 
       // Insertar un registro de versión en `fasercon_quote_versions`.

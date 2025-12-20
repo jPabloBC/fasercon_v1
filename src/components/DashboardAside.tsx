@@ -16,6 +16,7 @@ import React, { Fragment } from 'react';
 const NAV = [
   { id: 'overview', name: 'Resumen', icon: ChartBarIcon, href: '/dashboard' },
   { id: 'products', name: 'Productos', icon: ArchiveBoxIcon, href: '/dashboard/products' },
+  { id: 'clients', name: 'Clientes', icon: UserGroupIcon, href: '/dashboard/clients' },
   { id: 'quotes', name: 'Cotizaciones', icon: DocumentTextIcon, href: '/dashboard/quotes' },
   { id: 'contacts', name: 'Contactos', icon: UserGroupIcon, href: '/dashboard/contact' },
   { id: 'contact-form', name: 'Formulario', icon: ClipboardDocumentListIcon, href: '/dashboard/contact-form' },

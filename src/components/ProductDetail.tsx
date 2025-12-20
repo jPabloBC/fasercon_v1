@@ -3,6 +3,7 @@
 import React, { useMemo, useState, useCallback } from 'react'
 import { PhotoIcon } from '@heroicons/react/24/outline'
 import Image from 'next/image'
+import { formatCLP } from '@/lib/format'
 
 type Product = {
   id: string | number
@@ -418,7 +419,7 @@ export default function ProductDetail({ product, variants = [], onClose }: Props
           </div>
 
             <div className="mt-4 mt-auto flex flex-col sm:flex-row items-center gap-4">
-            <div className="text-lg font-semibold">{current.price != null ? `${current.price.toLocaleString('es-CL')} CLP` : ''}</div>
+            <div className="text-lg font-semibold">{current.price != null ? `${formatCLP(current.price)} CLP` : ''}</div>
             <div className="flex items-center gap-4">
               <button
                 onClick={() => setQty((q) => Math.max(1, q - 1))}

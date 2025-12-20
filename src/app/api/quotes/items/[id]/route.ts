@@ -5,12 +5,13 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ i
   try {
     const { id } = await context.params;
     const body = await request.json();
-    const { update_price, discount } = body;
-    if (!id || (typeof update_price !== 'number' && typeof discount !== 'number')) {
+    const { update_price, qty, discount } = body;
+    if (!id || (typeof update_price !== 'number' && typeof qty !== 'number' && typeof discount !== 'number')) {
       return NextResponse.json({ error: 'ID y al menos un campo a actualizar requerido' }, { status: 400 });
     }
     const updateObj: Record<string, number> = {};
     if (typeof update_price === 'number') updateObj.update_price = update_price;
+    if (typeof qty === 'number') updateObj.qty = qty;
     if (typeof discount === 'number') updateObj.discount = discount;
     const { data, error } = await supabaseAdmin
       .from('fasercon_quote_items')

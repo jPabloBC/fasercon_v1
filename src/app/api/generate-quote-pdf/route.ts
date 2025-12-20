@@ -1,10 +1,11 @@
 import { NextResponse } from 'next/server'
-import { generateQuotePDF } from '../../../lib/quotePdf'
+import { generateQuotePDF } from '../../../lib/quotePdfFile'
 import transporter from '../../../lib/email'
 import { buildQuoteEmail, buildInternalQuoteEmail } from '../../../lib/quoteEmail'
 import { supabase } from '@/lib/supabase'
 
 // Helper: compute next 4-digit correlative by inspecting existing correlative fields
+// NOTE: This is a preview endpoint, so it does NOT consume the sequence override
 async function computeNextCorrelative() {
   try {
     const { data: quotesCorrelatives } = await supabase.from('fasercon_quotes').select('correlative');
@@ -31,7 +32,7 @@ async function computeNextCorrelative() {
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { correlative, contact, items, createdAt, sendEmail, quote_number } = body;
+    const { correlative, contact, items, createdAt, sendEmail, quote_number, description, execution_time, payment_method } = body;
 
     // If correlative not provided, but quote_number was passed, try to fetch stored correlative
     let actualCorrelative = correlative;
@@ -56,7 +57,10 @@ export async function POST(request: Request) {
       actualCorrelative = await computeNextCorrelative();
     }
 
-    const pdfBytes = await generateQuotePDF({ correlative: actualCorrelative, contact, items, createdAt, quote_number });
+    // Debug: log items to verify SKU is present
+    console.log('[PDF Endpoint] Generating PDF with items:', JSON.stringify(items.map((it: any) => ({ name: it.name, sku: it.sku })), null, 2));
+
+    const pdfBytes = await generateQuotePDF({ correlative: actualCorrelative, contact, items, createdAt, quote_number, description, execution_time, payment_method });
 
     // Si se solicita enviar por email, intentar enviar tanto al cliente como internamente
     let emailSent = false;
@@ -64,9 +68,26 @@ export async function POST(request: Request) {
     if (sendEmail && contact?.email) {
       try {
         const clientMail = buildQuoteEmail({ contact, items });
-        const internalMail = buildInternalQuoteEmail({ contact, items });
 
-        // Enviar al cliente
+        // Prepare internal recipients: env may contain comma-separated emails.
+        const internalEnv = process.env.INTERNAL_QUOTES_EMAIL || '';
+        const internalRecipients = internalEnv
+          .split(',')
+          .map((s) => s.trim())
+          .filter(Boolean);
+        // Ensure jpbernal@fasercon.cl is included
+        if (!internalRecipients.includes('jpbernal@fasercon.cl')) {
+          internalRecipients.push('jpbernal@fasercon.cl');
+        }
+        // Also include the sending account (EMAIL_USER) so the sender receives the internal copy
+        const senderEmail = process.env.EMAIL_USER?.trim();
+        if (senderEmail && !internalRecipients.includes(senderEmail)) {
+          internalRecipients.push(senderEmail);
+        }
+        // Log internal recipients for debugging delivery issues
+        console.log('[generate-quote-pdf] internalRecipients:', internalRecipients);
+
+        // Enviar al cliente (sin BCC)
         await transporter.sendMail({
           from: { name: 'Fasercon', address: process.env.EMAIL_USER! },
           to: contact.email,
@@ -79,22 +100,49 @@ export async function POST(request: Request) {
         });
         emailSent = true;
 
-        // Enviar copia interna siempre a jpbernal@fasercon.cl
-        const internalRecipient = process.env.INTERNAL_QUOTES_EMAIL || 'jpbernal@fasercon.cl';
+        // Enviar correo interno separado (plantilla interna)
         try {
-          await transporter.sendMail({
-            from: { name: 'Fasercon', address: process.env.EMAIL_USER! },
-            to: internalRecipient,
-            subject: internalMail.subject,
-            html: internalMail.html,
-            text: internalMail.text,
-            attachments: [
-              { filename: `Cotizacion_${actualCorrelative}.pdf`, content: Buffer.from(pdfBytes) }
-            ]
-          });
-          internalEmailSent = true;
-        } catch (err) {
-          console.error('Error sending internal quote email:', err);
+          const internalMail = buildInternalQuoteEmail({ contact, items });
+          if (internalRecipients.length > 0) {
+            try {
+              const internalResult = await transporter.sendMail({
+                from: { name: 'Fasercon', address: process.env.EMAIL_USER! },
+                to: internalRecipients,
+                subject: internalMail.subject,
+                html: internalMail.html,
+                text: internalMail.text,
+                attachments: [
+                  { filename: `Cotizacion_${actualCorrelative}.pdf`, content: Buffer.from(pdfBytes) }
+                ]
+              });
+              console.log('[generate-quote-pdf] internal send result:', internalResult);
+              internalEmailSent = true;
+
+              // Additionally, send an explicit copy to info@fasercon.cl to ensure alias receives it
+              try {
+                const infoResult = await transporter.sendMail({
+                  from: { name: 'Fasercon', address: process.env.EMAIL_USER! },
+                  to: 'jpbernal@fasercon.cl',
+                  subject: internalMail.subject + ' (Copia Interna)',
+                  html: internalMail.html,
+                  text: internalMail.text,
+                  attachments: [
+                    { filename: `Cotizacion_${actualCorrelative}.pdf`, content: Buffer.from(pdfBytes) }
+                  ]
+                });
+                console.log('[generate-quote-pdf] explicit info@fasercon.cl send result:', infoResult);
+              } catch (infoErr) {
+                console.error('Error sending explicit copy to info@fasercon.cl:', infoErr);
+              }
+            } catch (innerSendErr) {
+              console.error('Error sending internal email (transport):', innerSendErr);
+              internalEmailSent = false;
+            }
+          } else {
+            internalEmailSent = false;
+          }
+        } catch (intErr) {
+          console.error('Error sending internal quote email:', intErr);
           internalEmailSent = false;
         }
       } catch (emailErr) {

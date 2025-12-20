@@ -94,12 +94,14 @@ export default async function ProductsPage() {
     console.error('Error loading products for products page:', err)
   }
 
+  // Filtrar solo productos públicos (solo visible === true, ignora null/undefined/false)
+  const publicProducts = products.filter(p => p.visible === true)
   return (
     <main className="min-h-screen">
       <Navbar />
       <section className="relative pt-16 md:pt-20 lg:pt-24 pb-12">
         {/* Client-side store UI with search, pagination and add-to-quote */}
-        <ProductsStore products={products} />
+        <ProductsStore products={publicProducts} />
 
         {/* Overlay reservado para mantenimiento */}
         

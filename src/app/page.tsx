@@ -1,6 +1,6 @@
 import Navbar from '@/components/Navbar'
 import Hero from '@/components/Hero'
-import ProductGallery from '@/components/ProductGallery'
+import RealtimeProductGallery from '@/components/RealtimeProductGallery'
 import Link from 'next/link'
 import HomeServicesCarousel from '@/components/HomeServicesCarousel'
 import ContactForm from '@/components/ContactForm'
@@ -17,6 +17,9 @@ export const metadata: Metadata = {
     type: 'website',
   },
 }
+
+// Force dynamic rendering to ensure randomization works on every request
+export const dynamic = 'force-dynamic'
 
 type DBProductRow = {
   id: string
@@ -87,6 +90,7 @@ export default async function Home() {
     const { data } = await supabaseAdmin
       .from('fasercon_products')
       .select('*')
+      .eq('visible', true)
       .order('order', { ascending: true });
 
     products = (data || []).map((p: DBProductRow) => {
@@ -142,8 +146,8 @@ export default async function Home() {
           <Link href="/services" className="inline-block rounded-md bg-red-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-red-500">Ver  nuestros servicios</Link>
         </div>
         
-        <ProductGallery 
-        products={products.map(product => ({
+        <RealtimeProductGallery 
+        initialProducts={products.map(product => ({
           ...product,
           moreInfoLink: `/products/${product.id}`
         }))} 

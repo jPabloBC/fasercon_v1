@@ -113,7 +113,7 @@ export const buildQuoteEmail = ({ contact, items }: { contact: QuoteContact, ite
   }
 }
 
-export const buildInternalQuoteEmail = ({ contact, items }: { contact: QuoteContact, items: QuoteItem[] }) => {
+export const buildInternalQuoteEmail = ({ contact, items, isQuote }: { contact: QuoteContact, items: QuoteItem[], isQuote?: boolean }) => {
   const itemRows = items.map(item => {
     const symbol = unitSymbol(item.measurement_unit);
     const unitSizeStr = toFraction(item.unit_size);
@@ -125,6 +125,46 @@ export const buildInternalQuoteEmail = ({ contact, items }: { contact: QuoteCont
     </tr>`;
   }).join('');
 
+  if (isQuote) {
+    return {
+      subject: 'Acuse de envío de Cotización - Fasercon',
+      html: `
+        <div style="font-family:Arial,sans-serif;max-width:600px;margin:auto;">
+          <h2 style="background:#2d3748;color:white;padding:16px 0;text-align:center;">Cotización enviada al cliente</h2>
+          <p>Se ha enviado la cotización al cliente con los siguientes detalles:</p>
+          <table style="width:100%;border-collapse:collapse;margin-bottom:16px;">
+            <thead>
+              <tr style="background:#edf2f7;">
+                <th style="padding:8px;border:1px solid #eee;">Producto</th>
+                <th style="padding:8px;border:1px solid #eee;">SKU</th>
+                <th style="padding:8px;border:1px solid #eee;">Cantidad</th>
+                <th style="padding:8px;border:1px solid #eee;">Unidad</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${itemRows}
+            </tbody>
+          </table>
+          <p><b>Contacto:</b></p>
+          <ul>
+            <li>Empresa: ${contact.company}</li>
+            <li>Email: ${contact.email}</li>
+            <li>Teléfono: ${contact.phone}</li>
+            ${contact.rut ? `<li>RUT/Documento: ${contact.rut}</li>` : ''}
+          </ul>
+          <hr style="margin:24px 0;border:none;border-top:1px solid #eee;">
+          <p style="font-size:12px;color:#888;text-align:center;">Este correo es un acuse interno del envío de cotización.</p>
+        </div>
+      `,
+      text: `Acuse de envío de Cotización Fasercon\n\nEmpresa: ${contact.company}\nEmail: ${contact.email}\nTeléfono: ${contact.phone}\n${contact.rut ? `RUT/Documento: ${contact.rut}\n` : ''}\n\nProductos:\n${items.map(i => {
+        const symbol = unitSymbol(i.measurement_unit);
+        const unitSizeStr = toFraction(i.unit_size);
+        return `- ${i.name} (${i.qty} ${unitSizeStr}${symbol ? ' ' + symbol : ''})`;
+      }).join('\n')}`
+    };
+  }
+
+  // ...original solicitud interna...
   return {
     subject: 'Nueva Solicitud de Cotización (Interno) - Fasercon',
     html: `

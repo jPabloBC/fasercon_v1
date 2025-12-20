@@ -71,7 +71,7 @@ export default function ContactFormPage() {
     <>
       {/* Remove DashboardHeader, now rendered in layout */}
       {/* <DashboardHeader title="Formulario" /> */}
-  <div className="px-2 sm:px-8 py-4 sm:py-6 mt-2 overflow-x-hidden">
+  <div className="overflow-x-hidden">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
           <h2 className="text-xl font-semibold">Datos enviados</h2>
           <input

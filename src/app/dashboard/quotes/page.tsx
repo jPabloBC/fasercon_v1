@@ -8,6 +8,7 @@ import { PhotoIcon } from '@heroicons/react/24/outline'
 import { Pair, NewProduct } from '@/lib/types'
 import PhoneInput, { isValidPhoneNumber } from 'react-phone-number-input';
 import 'react-phone-number-input/style.css';
+import { formatCLP } from '@/lib/format'
 
 
 type Product = {
@@ -28,6 +29,7 @@ type QuoteItem = {
   quote_id: string;
   product_id: string;
   name: string;
+  description?: string | null;
   image_url?: string | null;
   unit_size?: string | null;
   measurement_unit?: string | null;
@@ -56,20 +58,38 @@ type Quote = {
   status?: string;
   createdAt?: string;
   items?: QuoteItem[];
+  correlative?: string;
+  description?: string;
+  quote_number?: string;
+    execution_time?: string | null;
+    payment_method?: string | null;
 };
 
 export default function QuotesPage() {
   const [quotes, setQuotes] = useState<Quote[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedQuote, setSelectedQuote] = useState<Quote | null>(null);
+  const [editedQuote, setEditedQuote] = useState<Quote | null>(null);
   const [showModal, setShowModal] = useState(false);
+  const [showDateModal, setShowDateModal] = useState(false);
+  const [dateStart, setDateStart] = useState('');
+  const [dateEnd, setDateEnd] = useState('');
   const [mainRect, setMainRect] = useState<DOMRect | null>(null);
-  // Estado separado para los precios editables
+  // Estado separado para los precios, cantidades y descuentos editables
   const [editedPrices, setEditedPrices] = useState<Record<string, number>>({});
+  const [editedQtys, setEditedQtys] = useState<Record<string, number>>({});
   const [originalOrder, setOriginalOrder] = useState<string[]>([]);
-  const [editedDiscounts, setEditedDiscounts] = useState<Record<string, number>>({}); // porcentaje
+  const [editedDiscounts, setEditedDiscounts] = useState<Record<string, number>>({}) // porcentaje
   const [sending, setSending] = useState(false);
-  const [savingDraft] = useState(false);
+  const [versionsModalOpen, setVersionsModalOpen] = useState(false);
+  const [versionsList, setVersionsList] = useState<any[]>([]);
+  const [versionsLoading, setVersionsLoading] = useState(false);
+  const [selectedVersionPayload, setSelectedVersionPayload] = useState<any | null>(null);
+  const [, setSelectedVersionMeta] = useState<any | null>(null);
+  const [selectedQuoteForVersions, setSelectedQuoteForVersions] = useState<string | null>(null);
+  // Estado para saber qué cotización está previsualizando PDF
+  const [previewingPdfId, setPreviewingPdfId] = useState<string | null>(null);
+  const [savingDraft, setSavingDraft] = useState(false);
   // Estado para cotizaciones colapsadas (true = colapsada)
   const [collapsedQuotes, setCollapsedQuotes] = useState<Record<string, boolean>>({});
 
@@ -79,25 +99,88 @@ export default function QuotesPage() {
 
   // Guardar precios editados en la base de datos
   async function handleSavePrices() {
-    if (!selectedQuote?.items) return;
-    for (const item of selectedQuote.items) {
-      const price = editedPrices[item.id];
-      const discount =
-        typeof editedDiscounts[item.id] === 'number'
-          ? editedDiscounts[item.id]
-          : (typeof item.discount === 'number' ? item.discount : 0);
-      const payload: Record<string, unknown> = {};
-      if (typeof price === 'number') payload.update_price = price;
-      payload.discount = discount;
-      await fetch(`/api/quotes/items/${item.id}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
+    // Guardar cambios de cotización (campos generales + precios por ítem)
+    if (!editedQuote) return;
+    console.log('[handleSavePrices] Iniciando guardado. editedQuote:', editedQuote);
+    console.log('[handleSavePrices] editedPrices:', editedPrices);
+    console.log('[handleSavePrices] editedQtys:', editedQtys);
+    console.log('[handleSavePrices] editedDiscounts:', editedDiscounts);
+    try {
+      const fields = ['name', 'email', 'phone', 'description', 'execution_time', 'payment_method'];
+      const quotePayload: Record<string, unknown> = {};
+      for (const f of fields) {
+        const newVal = (editedQuote as any)[f];
+        const oldVal = (selectedQuote as any)?.[f];
+        // Comparar strings/undefined/null equivalentes
+        const normNew = newVal == null ? '' : String(newVal);
+        const normOld = oldVal == null ? '' : String(oldVal);
+        if (normNew !== normOld) quotePayload[f] = newVal;
+      }
+      if (Object.keys(quotePayload).length > 0) {
+        await fetch(`/api/quotes/${editedQuote.id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(quotePayload),
+        });
+      }
+    } catch (err) {
+      console.error('Error actualizando cotización:', err);
     }
-    alert('Precios guardados correctamente');
+
+    // Actualizar precios/descuentos SOLO si cambiaron en los items
+    if (editedQuote.items) {
+      console.log(`[handleSavePrices] Total items a procesar: ${editedQuote.items.length}`);
+      for (const item of editedQuote.items) {
+        if (!item.id) {
+          console.warn('Item sin ID, saltando:', item);
+          continue;
+        }
+        const newPrice = editedPrices[item.id] ?? item.update_price ?? item.price ?? 0;
+        const newQty = editedQtys[item.id] ?? item.qty ?? 1;
+        const newDiscount = editedDiscounts[item.id] ?? item.discount ?? 0;
+        const oldPrice = item.update_price ?? item.price ?? 0;
+        const oldQty = item.qty ?? 1;
+        const oldDiscount = item.discount ?? 0;
+
+        console.log(`[handleSavePrices] Item ${item.id} - Comparando:`, {
+          newPrice, oldPrice, priceChanged: newPrice !== oldPrice,
+          newQty, oldQty, qtyChanged: newQty !== oldQty,
+          newDiscount, oldDiscount, discountChanged: newDiscount !== oldDiscount
+        });
+
+        // Solo actualizar si el precio, cantidad o descuento cambió
+        if (newPrice !== oldPrice || newQty !== oldQty || newDiscount !== oldDiscount) {
+          const payload: Record<string, unknown> = { update_price: newPrice, qty: newQty, discount: newDiscount };
+          console.log(`[handleSavePrices] 🔄 Enviando PATCH para item ${item.id}:`, payload);
+          try {
+            const res = await fetch(`/api/quotes/items/${item.id}`, {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(payload),
+            });
+            if (!res.ok) {
+              const errText = await res.text();
+              console.error(`❌ Error actualizando item ${item.id}: ${res.status}`, errText);
+            } else {
+              const result = await res.json();
+              console.log(`✅ Item ${item.id} actualizado correctamente. Respuesta:`, result);
+            }
+          } catch (err) {
+            console.error('Error actualizando item', item.id, err);
+          }
+        }
+      }
+    }
+
+    alert('Cambios guardados correctamente');
     setEditedPrices({});
+    setEditedQtys({});
+    setEditedDiscounts({});
+    setEditedQuote(null);
+    setSelectedQuote(null);
     setShowModal(false);
+    // Optionally, refresh list
+    refreshQuotes();
   }
 
   const visibleMainRect = useMemo(() => {
@@ -117,6 +200,9 @@ export default function QuotesPage() {
   const [createForm, setCreateForm] = useState<any>({
     contact: { company: '', email: '', phone: '', document: '', company_address: '', contact_name: '', country: 'CL', region: '', city: '', postal_code: '', notes: '' },
     items: [] as any[],
+    description: '',
+    execution_time: '',
+    payment_method: ''
   });
   // Modal sections: 'client' | 'products' | 'items'
   const [createSection, setCreateSection] = useState<'client' | 'products' | 'items'>('client');
@@ -128,6 +214,8 @@ export default function QuotesPage() {
   const [cityList, setCityList] = useState<any[]>([]);
   const [creatingClient, setCreatingClient] = useState(false);
   const [selectedClientId, setSelectedClientId] = useState<string | null>(null);
+  const [originalClient, setOriginalClient] = useState<any | null>(null);
+  const [updatingClient, setUpdatingClient] = useState(false);
   
 
   // Validation state and helpers for client fields
@@ -143,33 +231,55 @@ export default function QuotesPage() {
   };
 
   // Helpers for create modal items
-  const updateCreateItem = (idx: number, field: string, value: any) => {
-    setCreateForm((prev: any) => {
-      const items = Array.isArray(prev.items) ? [...prev.items] : [];
-      items[idx] = { ...items[idx], [field]: value };
-      return { ...prev, items };
-    });
-  };
-
   const removeCreateItem = (idx: number) => {
     setCreateForm((prev: any) => ({ ...prev, items: Array.isArray(prev.items) ? prev.items.filter((_: any, i: number) => i !== idx) : [] }));
   };
 
   const handleSaveDraft = async () => {
+    // Validación: al menos uno de los campos de contacto debe estar presente
+    const { company, contact_name, email } = createForm.contact || {};
+    if (!company && !contact_name && !email) {
+      setToast({ type: 'error', message: 'Debes ingresar al menos empresa, nombre de contacto o email para guardar el borrador.' });
+      return;
+    }
+    setSavingDraft(true);
     try {
+      const payload = { ...createForm, draft: true };
+      if (selectedClientId) {
+        payload.client_id = selectedClientId;
+      }
       const res = await fetch('/api/quotes', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...createForm, draft: true }),
+        body: JSON.stringify(payload),
       });
+      const text = await res.text().catch(() => '');
+      let parsedBody: any = text;
+      try { parsedBody = text ? JSON.parse(text) : null; } catch { /* ignore */ }
+      console.debug('[DEBUG] handleSaveDraft response status:', res.status, 'body:', parsedBody);
       if (res.ok) {
         setToast({ type: 'success', message: 'Borrador guardado correctamente' });
+        // Cerrar modal inmediatamente
+        setShowCreateModal(false);
+        // Limpiar formulario inmediatamente
+        setCreateForm({
+          contact: { company: '', email: '', phone: '', document: '', company_address: '', contact_name: '', country: 'CL', region: '', city: '', postal_code: '', notes: '' },
+          items: [],
+          description: '',
+          execution_time: '',
+          payment_method: ''
+        });
+        setCreateSection('client');
       } else {
-        setToast({ type: 'error', message: 'Error al guardar borrador' });
+        console.warn('Failed to save draft:', res.status, parsedBody);
+        const msg = parsedBody?.message || 'Error al guardar borrador';
+        setToast({ type: 'error', message: msg });
       }
     } catch (err) {
       console.error('Error guardando borrador', err);
       setToast({ type: 'error', message: 'Error inesperado al guardar borrador' });
+    } finally {
+      setSavingDraft(false);
     }
   };
 
@@ -222,6 +332,53 @@ export default function QuotesPage() {
     return true;
   })();
 
+  // Normalize and compare client fields to detect meaningful edits
+  const fieldAliases: Record<string, string[]> = {
+    company: ['company', 'empresa', 'name'],
+    contact_name: ['contact_name', 'contact', 'nombre'],
+    email: ['email', 'correo'],
+    phone: ['phone', 'telefono', 'phone_number'],
+    document: ['document', 'rut', 'documento'],
+    company_address: ['company_address', 'address', 'direccion'],
+    country: ['country', 'pais'],
+    region: ['region'],
+    city: ['city', 'comuna', 'ciudad'],
+    postal_code: ['postal_code', 'zip', 'codigo_postal'],
+    notes: ['notes', 'nota', 'observaciones']
+  };
+
+  const getOriginalValue = (orig: any, key: string) => {
+    if (!orig) return '';
+    const aliases = fieldAliases[key] || [key];
+    for (const a of aliases) {
+      if (orig[a] !== undefined && orig[a] !== null) return orig[a];
+    }
+    return '';
+  };
+
+  const normalizeForCompare = (key: string, val: any) => {
+    if (val === null || val === undefined) return '';
+    const s = String(val).trim();
+    if (s === '') return '';
+    if (key === 'email') return s.toLowerCase();
+    if (key === 'company') return s.replace(/\s+/g, ' ').toUpperCase();
+    if (key === 'contact_name') return s.replace(/\s+/g, ' ').toLowerCase();
+    if (key === 'document') return cleanRUT(s);
+    if (key === 'phone') return s.replace(/[^\d\+]/g, '');
+    return s.replace(/\s+/g, ' ');
+  };
+
+  const clientFieldsChanged = (orig: any, current: any) => {
+    if (!orig) return false;
+    const keys = Object.keys(fieldAliases);
+    for (const k of keys) {
+      const origVal = normalizeForCompare(k, getOriginalValue(orig, k));
+      const curVal = normalizeForCompare(k, (current || {})[k]);
+      if (origVal !== curVal) return true;
+    }
+    return false;
+  };
+
   // Buscar clientes por texto (company / email / document)
   const searchClients = async (q: string) => {
     try {
@@ -229,7 +386,41 @@ export default function QuotesPage() {
       const res = await fetch(`/api/clients?q=${encodeURIComponent(q)}`);
       if (!res.ok) return setClientSearchResults([]);
       const data = await res.json();
-      setClientSearchResults(Array.isArray(data) ? data : (data ? [data] : []));
+      const list = Array.isArray(data?.clients) ? data.clients : (Array.isArray(data) ? data : (data ? [data] : []));
+      if (list.length > 0) {
+        setClientSearchResults(list);
+        return;
+      }
+
+      // Fallback: if server returned no matches, fetch all clients and search across all fields locally
+      try {
+        const allRes = await fetch('/api/clients');
+        if (!allRes.ok) return setClientSearchResults([]);
+        const allData = await allRes.json();
+        const allList = Array.isArray(allData?.clients) ? allData.clients : (Array.isArray(allData) ? allData : []);
+        const term = q.toLowerCase();
+        const filtered = allList.filter((item: any) => {
+          for (const key of Object.keys(item)) {
+            const val = item[key];
+            if (val === null || val === undefined) continue;
+            if (typeof val === 'string' && val.toLowerCase().includes(term)) return true;
+            if (typeof val === 'number' && String(val).includes(term)) return true;
+            // for objects (metadata), stringify and search
+            if (typeof val === 'object') {
+              try {
+                const s = JSON.stringify(val).toLowerCase();
+                if (s.includes(term)) return true;
+              } catch { }
+            }
+          }
+          return false;
+        }).slice(0, 100);
+        setClientSearchResults(filtered);
+        return;
+      } catch (e) {
+        console.error('Fallback client search failed', e);
+        setClientSearchResults([]);
+      }
     } catch (err) {
       console.error(err);
       setClientSearchResults([]);
@@ -242,12 +433,14 @@ export default function QuotesPage() {
     if (clientSearchTimeout.current) {
       clearTimeout(clientSearchTimeout.current);
     }
-    if (!clientSearchQuery || clientSearchQuery.trim() === '') {
+    const q = String(clientSearchQuery || '').trim();
+    // only search when at least 3 characters have been entered
+    if (!q || q.length < 3) {
       setClientSearchResults([]);
       return;
     }
     clientSearchTimeout.current = window.setTimeout(() => {
-      searchClients(clientSearchQuery.trim());
+      searchClients(q);
     }, 300);
     return () => {
       if (clientSearchTimeout.current) clearTimeout(clientSearchTimeout.current);
@@ -290,7 +483,10 @@ export default function QuotesPage() {
   const [charRows, setCharRows] = useState<Pair[]>([])
   const [appRows, setAppRows] = useState<Pair[]>([])
   const [toast, setToast] = useState<{ type: 'success' | 'error'; message: string } | null>(null)
+  const productListRef = useRef<HTMLDivElement>(null);
   const [showCancelConfirm, setShowCancelConfirm] = useState(false);
+  const [showQuoteSendConfirm, setShowQuoteSendConfirm] = useState(false);
+  const [quoteToSend, setQuoteToSend] = useState<Quote | null>(null);
   // Suppliers list used by ProductEditor
   const [allSuppliers, setAllSuppliers] = useState<any[]>([]);
   // unit labels (same as in products page) used by ProductEditor
@@ -325,21 +521,84 @@ export default function QuotesPage() {
   const [productSearchQuery, setProductSearchQuery] = useState('');
   const [productSearchResults, setProductSearchResults] = useState<any[]>([]);
   const productSearchTimeout = useRef<number | null>(null);
+  const productSearchRef = useRef<HTMLInputElement | null>(null);
+  const descriptionRef = useRef<HTMLTextAreaElement | null>(null);
 
   const searchProducts = async (q: string) => {
     try {
       if (!q || q.trim() === '') return setProductSearchResults([]);
-      const res = await fetch(`/api/products?q=${encodeURIComponent(q.trim())}`);
-      if (!res.ok) return setProductSearchResults([]);
-      const data = await res.json();
-      // API returns { products }
-      const products = Array.isArray(data?.products) ? data.products : [];
-      setProductSearchResults(products);
+      // fetch products and quote-services in parallel
+      const [prodRes, svcRes] = await Promise.all([
+        fetch(`/api/products?q=${encodeURIComponent(q.trim())}`),
+        fetch(`/api/quote-services?q=${encodeURIComponent(q.trim())}`),
+      ]);
+      const prodJson = prodRes.ok ? await prodRes.json() : { products: [] };
+      const svcJson = svcRes.ok ? await svcRes.json() : { services: [] };
+      const products = Array.isArray(prodJson?.products) ? prodJson.products : [];
+      const services = Array.isArray(svcJson?.services) ? svcJson.services : [];
+      // If query looks like a UUID, also try direct fetch by id for both tables
+      const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+      const rawQ = q.trim();
+      const isFullUuid = uuidRegex.test(rawQ);
+      // Only attempt direct fetch when we have a full UUID
+      if (isFullUuid) {
+        try {
+          const byIdProd = await fetch(`/api/products/${encodeURIComponent(rawQ)}`);
+          if (byIdProd.ok) {
+            const single = await byIdProd.json();
+            // backend might return object or { product }
+            const p = single && (single.product || single);
+            if (p) products.unshift(p);
+          }
+        } catch { /* ignore */ }
+        try {
+          const byIdSvc = await fetch(`/api/quote-services/${encodeURIComponent(rawQ)}`);
+          if (byIdSvc.ok) {
+            const single = await byIdSvc.json();
+            const s = single && (single.service || single);
+            if (s) services.unshift(s);
+          }
+        } catch { /* ignore */ }
+      }
+      // normalize services to product-like shape: use `name` for display
+      const normalizedServices = services.map((s: any) => ({
+        ...s,
+        _type: 'service',
+        name: s.title || s.name || 'Servicio',
+        sku: s.sku || s.id,
+        price: s.price ?? 0,
+        measurement_unit: s.unit_measure || s.measurement_unit || null,
+        image_url: s.image_url || (Array.isArray(s.images) ? s.images[0] : null),
+      }));
+      const normalizedProducts = products.map((p: any) => ({ ...p, _type: 'product' }));
+      // merge and dedupe by id/sku
+      const merged: any[] = [];
+      const seen = new Set<string>();
+      for (const item of [...normalizedServices, ...normalizedProducts]) {
+        const key = String(item.id || item.sku || item.product_id || '');
+        if (!key) continue;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        merged.push(item);
+      }
+      setProductSearchResults(merged);
     } catch (err) {
       console.error(err);
       setProductSearchResults([]);
     }
   };
+
+  useEffect(() => {
+    const ta = descriptionRef.current;
+    if (!ta) return;
+    // reset height to compute scrollHeight correctly
+    ta.style.height = 'auto';
+    const max = Math.round((window.innerHeight || 800) * 0.45); // max ~45% viewport height
+    const newHeight = Math.min(ta.scrollHeight, max);
+    ta.style.height = `${newHeight}px`;
+    ta.style.maxHeight = `${max}px`;
+    ta.style.overflowY = ta.scrollHeight > max ? 'auto' : 'hidden';
+  }, [createForm.description]);
 
   const fetchProducts = async () => {
     try {
@@ -373,8 +632,8 @@ export default function QuotesPage() {
         unit_size: p.unit_size || null,
         measurement_unit: p.measurement_unit || null,
         qty: 1,
-        price: typeof p.price === 'number' ? p.price : 0,
-        update_price: typeof p.price === 'number' ? p.price : 0,
+            price: p.price ?? 0,
+            update_price: p.price ?? 0,
         discount: 0,
         company: null,
         email: null,
@@ -387,7 +646,9 @@ export default function QuotesPage() {
       return { ...prev, items: [...items, newItem] };
     });
     setToast({ type: 'success', message: 'Producto agregado a la cotización' });
-    // keep search results visible
+    // Restablecer el buscador
+    setProductSearchQuery('');
+    setProductSearchResults([]);
     setShowMatches(false);
   }
 
@@ -444,7 +705,7 @@ export default function QuotesPage() {
   const formatCurrencyInput = (v?: number | null) => {
     if (v == null) return ''
     try {
-      return new Intl.NumberFormat('es-CL', { style: 'currency', currency: 'CLP', maximumFractionDigits: 0 }).format(v)
+            return new Intl.NumberFormat('es-CL', { style: 'currency', currency: 'CLP', maximumFractionDigits: 0 }).format(v ?? 0);
     } catch {
       return String(v)
     }
@@ -457,10 +718,16 @@ export default function QuotesPage() {
 
   useEffect(() => {
     if (toast) {
-      const t = setTimeout(() => setToast(null), 3500)
-      return () => clearTimeout(t)
+      const t = setTimeout(() => {
+        setToast(null);
+        // Scroll to product list after toast disappears
+        if (productListRef.current) {
+          productListRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+      }, 3500);
+      return () => clearTimeout(t);
     }
-  }, [toast])
+  }, [toast]);
 
   // fetch suppliers list for ProductEditor (once)
   useEffect(() => {
@@ -486,12 +753,14 @@ export default function QuotesPage() {
     if (productSearchTimeout.current) {
       clearTimeout(productSearchTimeout.current);
     }
-    if (!productSearchQuery || productSearchQuery.trim() === '') {
+    const q = String(productSearchQuery || '').trim();
+    // Only start searching when there are at least 3 characters
+    if (!q || q.length < 3) {
       setProductSearchResults([]);
       return;
     }
     productSearchTimeout.current = window.setTimeout(() => {
-      searchProducts(productSearchQuery.trim());
+      searchProducts(q);
     }, 300);
     return () => {
       if (productSearchTimeout.current) clearTimeout(productSearchTimeout.current);
@@ -500,7 +769,7 @@ export default function QuotesPage() {
   
 
   const openCreateModal = () => {
-    setCreateForm({ contact: { company: '', contact_name: '', email: '', phone: '', document: '', company_address: '', country: 'CL', region: '', city: '', postal_code: '', notes: '' }, items: [] });
+    setCreateForm({ contact: { company: '', contact_name: '', email: '', phone: '', document: '', company_address: '', country: 'CL', region: '', city: '', postal_code: '', notes: '' }, items: [], description: '', execution_time: '', payment_method: '' });
     // Ensure modal opens on the 'client' section and clear previous searches/selections
     setCreateSection('client');
     setClientSearchQuery('');
@@ -542,6 +811,149 @@ export default function QuotesPage() {
     const interval = setInterval(fetchQuotes, 10000); // 10 segundos
     return () => { stopped = true; clearInterval(interval); };
   }, []);
+
+  // Refresh helper usable by UI buttons
+  const refreshQuotes = async () => {
+    setLoading(true);
+    try {
+      const res = await fetch('/api/quotes');
+      const data = await res.json();
+      const arr = Array.isArray(data) ? data : [];
+      setQuotes(arr);
+    } catch (err) {
+      console.error('Error refreshing quotes', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Helper to send a quote selected from the list after confirmation
+  async function sendQuoteFromList() {
+    const q = quoteToSend;
+    if (!q) return;
+    setShowQuoteSendConfirm(false);
+    setSending(true);
+    try {
+      // Final fetch to ensure we're using the very latest data
+      let liveQuote: Quote | null = null;
+      try {
+        const res = await fetch('/api/quotes');
+        if (res.ok) {
+          const all = await res.json();
+          liveQuote = all.find((x: Quote) => x.id === q.id) ?? null;
+        }
+      } catch {
+        // ignore and fallback
+      }
+      if (!liveQuote) liveQuote = (selectedQuote && selectedQuote.id === q.id) ? selectedQuote : (quotes.find(x => x.id === q.id) ?? q as Quote);
+
+      // Generate PDF and send (endpoint will fetch items from DB automatically)
+      const response = await fetch('/api/send-quote-response', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          quote_id: q.id, 
+          sendEmail: true 
+        }),
+      });
+
+      if (!response.ok) {
+        alert('Error generating PDF or sending email');
+        setSending(false);
+        return;
+      }
+
+      const emailSent = response.headers.get('x-email-sent') === 'true';
+      if (emailSent) {
+        setToast({ type: 'success', message: 'Cotización enviada por email correctamente.' });
+        // Refresh quotes list to reflect updated status
+        await refreshQuotes();
+      } else {
+        setToast({ type: 'error', message: 'Cotización guardada, pero el correo no se pudo enviar.' });
+      }
+    } catch (err) {
+      console.error(err);
+      setToast({ type: 'error', message: 'Error al generar o enviar la cotización.' });
+    } finally {
+      setSending(false);
+      setQuoteToSend(null);
+    }
+  }
+
+  // Preview PDF for a given quote (opens PDF in new tab) — uses the formal "Cotización" template
+  async function previewQuotePdf(q: Quote) {
+    // El estado de previewingPdfId se maneja en el botón, no aquí
+    try {
+      // Usar la misma lógica que send-quote-response: pasar quote_id y dejar que el API lo resuelva
+      const payload: Record<string, unknown> = {
+        quote_id: q.id,
+        sendEmail: false,
+      };
+
+      const resp = await fetch('/api/send-quote-response', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+
+      if (!resp.ok) {
+        setToast({ type: 'error', message: 'Error generando PDF.' });
+        return;
+      }
+
+      const blob = await resp.blob();
+      const url = URL.createObjectURL(blob);
+      window.open(url, '_blank');
+    } catch (err) {
+      console.error('Error previewing PDF', err);
+      setToast({ type: 'error', message: 'Error generando previsualización.' });
+    } finally {
+      // El estado de previewingPdfId se maneja en el botón, no aquí
+    }
+  }
+
+  // Versions modal helpers
+  async function openVersionsModal(quoteId: string) {
+    console.log('[Versions] openVersionsModal called for', quoteId);
+    setSelectedQuoteForVersions(quoteId);
+    setVersionsModalOpen(true);
+    setVersionsLoading(true);
+    try {
+      const res = await fetch(`/api/quotes/${encodeURIComponent(quoteId)}/versions`);
+      console.log('[Versions] fetch response status', res.status);
+      if (!res.ok) {
+        setVersionsList([]);
+      } else {
+        const data = await res.json();
+        console.log('[Versions] data received', data);
+        setVersionsList(Array.isArray(data) ? data : []);
+      }
+    } catch (err) {
+      console.error('Failed to fetch versions', err);
+      setVersionsList([]);
+    } finally {
+      setVersionsLoading(false);
+    }
+  }
+
+  async function fetchAndShowVersion(quoteId: string, version: string | number) {
+    try {
+      const verPath = String(version) === 'latest' ? 'latest' : String(version);
+      const res = await fetch(`/api/quotes/${encodeURIComponent(quoteId)}/versions/${verPath}`);
+      if (!res.ok) {
+        setSelectedVersionMeta(null);
+        setSelectedVersionPayload(null);
+        return;
+      }
+      const data = await res.json();
+      setSelectedVersionMeta({ id: data.id, version: data.version, correlativo: data.correlativo, created_by: data.created_by, created_at: data.created_at });
+      setSelectedVersionPayload(data.payload ?? null);
+    } catch (err) {
+      console.error('Failed to fetch version payload', err);
+      setSelectedVersionMeta(null);
+      setSelectedVersionPayload(null);
+    }
+  }
 
   // Mantener el rect del elemento <main> y actualizarlo cuando cambie tamaño, scroll o DOM
   useEffect(() => {
@@ -626,7 +1038,7 @@ export default function QuotesPage() {
 
   const handleCancelCreateModal = async () => {
     setSelectedClientId(null);
-    setCreateForm({ contact: { company: '', contact_name: '', email: '', phone: '', document: '', company_address: '', country: 'CL', region: '', city: '', postal_code: '', notes: '' }, items: [] });
+    setCreateForm({ contact: { company: '', contact_name: '', email: '', phone: '', document: '', company_address: '', country: 'CL', region: '', city: '', postal_code: '', notes: '' }, items: [], description: '', execution_time: '', payment_method: '' });
     setCreateSection('client');
     setClientSearchQuery('');
     setClientSearchResults([]);
@@ -638,13 +1050,70 @@ export default function QuotesPage() {
       {/* Global toast so it remains visible even after modals close */}
       {toast && (
         <div
-          className={`fixed left-1/2 -translate-x-1/2 top-6 z-[90] px-6 py-3 rounded shadow-lg font-normal text-white transition-all duration-300 ${toast.type === 'success' ? 'bg-green-600' : 'bg-red-600'}`}
-          style={{ minWidth: '220px', maxWidth: '90vw', textAlign: 'center' }}
+          className={`fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-[9999] px-8 py-5 rounded-xl shadow-2xl font-normal text-base text-white transition-all duration-300 ${toast.type === 'success' ? 'bg-green-600/70' : 'bg-red-600/70'}`}
+          style={{ minWidth: '320px', maxWidth: '90vw', textAlign: 'center', backdropFilter: 'blur(4px)', opacity: 0.98, boxShadow: '0 8px 32px rgba(0,0,0,0.25)' }}
         >
           {toast.message}
         </div>
       )}
-        {showModal && selectedQuote && (
+      {/* Confirmation modal for sending a quote from the list (rendered once) */}
+      {showQuoteSendConfirm && (
+        <>
+          <div className="fixed inset-0 bg-black/60 z-[110]" onClick={() => { setShowQuoteSendConfirm(false); setQuoteToSend(null); }} />
+          <div className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-[111] px-8 py-6 rounded-xl shadow-lg font-normal text-gray-800 bg-white border border-gray-200" role="dialog" aria-modal="true">
+            <div className="mb-2 text-xl font-bold text-gray-400 text-center">Confirmar envío</div>
+              <div className="mb-3 text-sm text-gray-600 text-center">¿Deseas enviar la cotización seleccionada al cliente?</div>
+              {(quoteToSend && (quoteToSend.items ?? []).some((it:any) => {
+                const hasUpdate = it.update_price !== null && it.update_price !== undefined;
+                const hasPrice = it.price !== null && it.price !== undefined;
+                if (hasUpdate) return Number(it.update_price) === 0;
+                if (hasPrice) return Number(it.price) === 0;
+                return false;
+              })) && (
+                <div className="mb-3 text-sm text-red-700 text-center">
+                  <div>Advertencia: hay productos con valor 0 en esta cotización.</div>
+                  <div>Revisa los precios antes de enviar, o elige Continuar para enviar.</div>
+                </div>
+              )}
+            <div className="flex gap-3 justify-center mt-6">
+              <button className="px-4 py-2 bg-gray-100 rounded border" onClick={() => { setShowQuoteSendConfirm(false); setQuoteToSend(null); }}>Cancelar</button>
+              <button className="px-4 py-2 bg-red-600 text-white rounded" onClick={async () => { await sendQuoteFromList(); }}>Continuar</button>
+            </div>
+          </div>
+        </>
+      )}
+      {/* Floating action buttons (top-right) visible only when create modal is closed */}
+      {!showCreateModal && (
+        <div className="fixed top-12 right-12 z-[120] flex flex-col gap-3 items-end">
+          <div className="flex flex-row gap-2 items-center">
+            <button
+              onClick={openCreateModal}
+              aria-label="Crear cotización"
+              title="Crear cotización"
+              className="h-12 w-12 rounded-full bg-red-600 text-white shadow-lg hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-400 flex items-center justify-center"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+              </svg>
+            </button>
+
+            <button
+              onClick={refreshQuotes}
+              aria-label="Actualizar cotizaciones"
+              title="Actualizar cotizaciones"
+              className="h-10 w-10 rounded-full bg-gray-100 text-red-600 shadow-lg hover:bg-gray-200 focus:outline-none focus:ring-2 focus:ring-red-400 flex items-center justify-center"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                <polyline points="23 4 23 10 17 10" strokeLinecap="round" strokeLinejoin="round"></polyline>
+                <polyline points="1 20 1 14 7 14" strokeLinecap="round" strokeLinejoin="round"></polyline>
+                <path d="M3.51 9a9 9 0 0 1 14.13-3.36" strokeLinecap="round" strokeLinejoin="round"></path>
+                <path d="M20.49 15a9 9 0 0 1-14.13 3.36" strokeLinecap="round" strokeLinejoin="round"></path>
+              </svg>
+            </button>
+          </div>
+        </div>
+      )}
+        {showModal && editedQuote && (
           <div
             style={(() => {
               const rect = visibleMainRect ?? mainRect;
@@ -658,136 +1127,184 @@ export default function QuotesPage() {
                   zIndex: 50,
                   display: 'flex',
                   alignItems: 'center',
-                  justifyContent: 'center'
+                  justifyContent: 'center',
+                  overflow: 'auto'
                 } as const;
               }
               // fallback seguro si no hay mainRect
-              return { position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', zIndex: 50, display: 'flex', alignItems: 'center', justifyContent: 'center' } as const;
+              return { position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', zIndex: 50, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'auto' } as const;
             })()}
           >
-          <div style={{ backgroundColor: 'rgba(0,0,0,0.12)', position: 'absolute', inset: 0 }} />
+          <div style={{ backgroundColor: 'rgba(0,0,0,0.15)', position: 'absolute', inset: 0 }} />
           <div
-            className="bg-white rounded-lg shadow-lg p-6 relative flex flex-col"
+            className="bg-white rounded-lg shadow-xl py-6 px-8 relative flex flex-col text-sm m-4"
             style={{
               width: (() => {
                 const rect = visibleMainRect ?? mainRect;
                 if (rect) {
-                  return `${Math.round(rect.width * 0.95)}px`;
+                  return `${Math.round(rect.width * 0.92)}px`;
                 }
-                return '95vw';
+                return '92vw';
               })(),
-              height: (() => {
+              height: 'auto',
+              maxHeight: (() => {
                 const rect = visibleMainRect ?? mainRect;
                 if (rect) {
-                  return `${Math.round(rect.height * 0.95)}px`;
+                  return `${Math.round(rect.height * 0.90)}px`;
                 }
-                return '95vh';
+                return '90vh';
               })(),
               maxWidth: '100%',
-              maxHeight: '100%'
+              overflowY: 'auto'
             }}
           >
-              <button className="absolute top-2 right-2 text-gray-500 hover:text-gray-700" onClick={() => setShowModal(false)}>&times;</button>
-              <h2 className="text-xl font-bold mb-4 text-red-700">Responder Cotización</h2>
-              <div className="grid grid-cols-2 gap-4 mb-4">
-                <div><span className="font-semibold">Empresa:</span> {selectedQuote.name}</div>
-                <div><span className="font-semibold">Email:</span> {selectedQuote.email}</div>
-                <div><span className="font-semibold">Teléfono:</span> {selectedQuote.phone}</div>
-                <div><span className="font-semibold">Área:</span> {selectedQuote.area ?? '-'}</div>
-                <div><span className="font-semibold">Material:</span> {selectedQuote.materialType ?? '-'}</div>
-                <div><span className="font-semibold">Precio estimado:</span> {selectedQuote.estimatedPrice ? `$${selectedQuote.estimatedPrice.toLocaleString()}` : '-'}</div>
-                <div><span className="font-semibold">Estado:</span> {selectedQuote.status ?? '-'}</div>
-                <div><span className="font-semibold">Creado:</span> {selectedQuote.createdAt ? new Date(selectedQuote.createdAt).toLocaleString() : '-'}</div>
+              
+              <h2 className="text-xl font-bold mb-5 text-red-700 pb-3 border-b border-gray-200">Editar Cotización</h2>
+              
+              {/* First row: main fields */}
+              <div className="grid grid-cols-1 md:grid-cols-5 gap-3 mb-5 items-start">
+                <div>
+                  <label className="font-semibold block text-xs text-gray-700 mb-1">Empresa</label>
+                  <div className="w-full border border-gray-300 px-3 py-2 rounded text-sm bg-gray-100 text-gray-700">
+                    {editedQuote.name || '-'}
+                  </div>
+                </div>
+                <div>
+                  <label className="font-semibold block text-xs text-gray-700 mb-1">Email</label>
+                  <div className="w-full border border-gray-300 px-3 py-2 rounded text-sm bg-gray-100 text-gray-700">
+                    {editedQuote.email || '-'}
+                  </div>
+                </div>
+                <div>
+                  <label className="font-semibold block text-xs text-gray-700 mb-1">Teléfono</label>
+                  <div className="w-full border border-gray-300 px-3 py-2 rounded text-sm bg-gray-100 text-gray-700">
+                    {editedQuote.phone || '-'}
+                  </div>
+                </div>
+                <div className="md:col-span-1">
+                  <label className="font-semibold block text-xs text-gray-700 mb-1">Tiempo de Ejecución</label>
+                  <div className="relative group">
+                    <button 
+                      onClick={() => {
+                        // Parse dates if they exist in execution_time field (format: "YYYY-MM-DD|YYYY-MM-DD")
+                        const dateRange = editedQuote.execution_time?.split('|') || [];
+                        const tempStart = dateRange[0] || '';
+                        const tempEnd = dateRange[1] || '';
+                        // Store temporary values for the modal
+                        (window as any).__dateStart = tempStart;
+                        (window as any).__dateEnd = tempEnd;
+                        setShowDateModal(true);
+                      }}
+                      className="mt-0 w-full flex items-center justify-center border border-gray-300 px-3 py-2 rounded text-sm focus:outline-none focus:border-red-500 focus:ring-1 focus:ring-red-200 bg-white hover:bg-gray-50 transition text-gray-700 font-medium"
+                      aria-label="Seleccionar rango de fechas"
+                    >
+                      {editedQuote.execution_time ? (() => {
+                        const dates = editedQuote.execution_time.split('|');
+                        if (dates.length === 2 && dates[0] && dates[1]) {
+                          const start = new Date(dates[0]);
+                          const end = new Date(dates[1]);
+                          const diffMs = end.getTime() - start.getTime();
+                          const days = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+                          return `${days} ${days === 1 ? 'día' : 'días'}`;
+                        }
+                        return 'Rango';
+                      })() : 'Seleccionar fechas'}
+                    </button>
+
+                    {/* Custom tooltip shown on hover - larger than native */}
+                    <div className="absolute left-1/2 -translate-x-1/2 bottom-full mb-2 w-max max-w-xs hidden group-hover:block z-50">
+                      <div className="bg-white border border-gray-300 rounded p-3 text-sm shadow-lg text-gray-800">
+                        {editedQuote.execution_time ? (() => {
+                          const dates = editedQuote.execution_time.split('|');
+                          if (dates.length === 2 && dates[0] && dates[1]) {
+                            const start = new Date(dates[0]);
+                            const end = new Date(dates[1]);
+                            return <div className="whitespace-nowrap font-medium">{start.toLocaleDateString()} → {end.toLocaleDateString()}</div>;
+                          }
+                          return <div className="text-gray-500">Sin rango</div>;
+                        })() : <div className="text-gray-500">Sin rango</div>}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <div>
+                  <label className="font-semibold block text-xs text-gray-700 mb-1">Forma pago</label>
+                  <input className="mt-0 w-full border border-gray-300 px-3 py-2 rounded text-sm focus:outline-none focus:border-red-500 focus:ring-1 focus:ring-red-200" value={editedQuote.payment_method ?? ''} onChange={e => setEditedQuote(prev => prev ? ({ ...prev, payment_method: e.target.value }) : prev)} />
+                </div>
               </div>
-              <div>
-                <span className="font-semibold">Productos:</span>
-                <table className="min-w-full border mt-2 mb-4">
+
+              {/* Description section */}
+              <div className="mb-5 w-full">
+                <label className="font-semibold block text-xs text-gray-700 mb-2">Descripción de la cotización</label>
+                <textarea
+                  className="w-full border border-gray-300 p-3 rounded text-sm bg-gray-50 resize-none focus:outline-none focus:border-red-500 focus:ring-1 focus:ring-red-200"
+                  value={editedQuote.description ?? ''}
+                  onChange={e => setEditedQuote(prev => prev ? ({ ...prev, description: e.target.value }) : prev)}
+                  rows={2}
+                />
+              </div>
+              {/* Services/Products section */}
+              <div className="mb-5 w-full">
+                <div className="flex items-center justify-between mb-3 pb-2 border-b border-gray-300">
+                  <h3 className="text-sm font-bold text-gray-800">Servicios / Productos</h3>
+                  <span className="text-xs text-gray-500 bg-gray-100 px-2 py-1 rounded">Total: {editedQuote.items?.length ?? 0} items</span>
+                </div>
+                <div className="overflow-x-auto border border-gray-300 rounded-lg bg-white shadow-sm">
+                <table className="min-w-full text-xs">
                   <thead>
-                    <tr className="bg-gray-100">
-                      <th className="border px-2 py-1 text-center font-semibold" style={{ width: '1%' }}>SKU</th>
-                      <th className="border px-2 py-1 text-left font-semibold">Producto</th>
-                      <th className="border px-2 py-1 text-center font-semibold">Cantidad</th>
-                      <th className="border px-2 py-1 text-center font-semibold">Unidad</th>
-                      <th className="border px-2 py-1 text-center font-semibold">Precio estimado</th>
-                      <th className="border px-2 py-1 text-center font-semibold">P/U</th>
-                      <th className="border px-1 py-1 text-center font-semibold w-32">Valor producto</th>
-                      <th className="border px-1 py-1 text-center font-semibold w-32">Total producto</th>
-                      <th className="border px-1 py-1 text-center font-semibold w-32">Descuento (%)</th>
-                      <th className="border px-1 py-1 text-center font-semibold w-32">Subtotal</th>
+                    <tr className="bg-red-600 text-white">
+                      <th className="px-3 py-2 text-center font-bold border-r border-red-700">Código</th>
+                      <th className="px-3 py-2 text-left font-bold border-r border-red-700">Características</th>
+                      <th className="px-3 py-2 text-center font-bold border-r border-red-700 w-16">Cantidad</th>
+                      <th className="px-3 py-2 text-center font-bold border-r border-red-700 w-16">Unidad</th>
+                      <th className="px-3 py-2 text-center font-bold border-r border-red-700 w-24">Precio U</th>
+                      <th className="px-3 py-2 text-center font-bold border-r border-red-700 w-24">Cant. x P/U</th>
+                      <th className="px-3 py-2 text-center font-bold border-r border-red-700 w-16">Desc. %</th>
+                      <th className="px-3 py-2 text-center font-bold w-24">Subtotal</th>
                     </tr>
                   </thead>
                   <tbody>
-                      {selectedQuote.items && originalOrder.length > 0
-                        ? originalOrder.map(id => {
-                            const item = selectedQuote.items?.find(i => i.id === id);
+                      {editedQuote.items && originalOrder.length > 0
+                        ? originalOrder.map((id) => {
+                            const item = editedQuote.items?.find(i => i.id === id);
                             if (!item) return null;
                             return (
-                              <tr key={item.id}>
-                                <td className="border px-2 py-1 text-center" style={{ width: '1%' }}>
-                                  <div className="flex items-center justify-center w-full">
-                                    <span className="text-center" style={{
-                                      width: `${Math.max(String(item.product?.sku || item.product_id || '-').length * 9, 80)}px`,
-                                      minWidth: '80px',
-                                      maxWidth: '140px',
-                                      display: 'inline-block'
-                                    }}>{String(item.product?.sku || item.product_id || '-')}</span>
-                                  </div>
+                              <tr key={item.id} className="border-b border-gray-300 hover:bg-gray-50 transition-colors">
+                                <td className="border-r border-gray-300 px-3 py-2 text-center font-semibold">
+                                  {String(item.product?.sku || item.product_id || '-')}
                                 </td>
-                                <td className="border px-2 py-1 text-left">{item.name}</td>
-                                <td className="border px-2 py-1 text-center" style={{ width: '1%' }}>
-                                  <div className="flex items-center justify-center w-full">
-                                    <span className="text-center" style={{
-                                      width: `${Math.max(String(item.qty).length * 10, 40)}px`,
-                                      minWidth: '40px',
-                                      maxWidth: '80px',
-                                      display: 'inline-block'
-                                    }}>{item.qty}</span>
-                                  </div>
+                                <td className="border-r border-gray-300 px-3 py-2 text-left">
+                                  <div style={{ whiteSpace: 'normal', wordBreak: 'break-word', overflowWrap: 'break-word', fontSize: '11px' }}>{item.name}</div>
                                 </td>
-                                <td className="border px-2 py-1 text-center" style={{ width: '1%' }}>
-                                  <div className="flex items-center justify-center w-full">
-                                    <span className="text-center" style={{
-                                      width: `${Math.max((`${item.unit_size ?? ''} ${item.measurement_unit ?? ''}`).length * 8, 40)}px`,
-                                      minWidth: '80px',
-                                      maxWidth: '120px',
-                                      display: 'inline-block'
-                                    }}>{item.unit_size} {item.measurement_unit}</span>
-                                  </div>
+                                <td className="border-r border-gray-300 px-3 py-2 text-center">
+                                  <input
+                                    type="number"
+                                    className="w-full border border-gray-300 px-2 py-1 rounded text-xs text-center focus:outline-none focus:border-red-500 [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none [&]:appearance-none"
+                                    value={editedQuote.items?.find(it => it.id === item.id)?.qty ?? item.qty}
+                                    onChange={e => {
+                                      const newQty = Math.max(0, parseInt(e.target.value) || 0);
+                                      console.log(`[onChange Cantidad] Item ${item.id}: ${item.qty} -> ${newQty}`);
+                                      setEditedQuote(prev => {
+                                        if (!prev) return prev;
+                                        const newItems = (prev.items || []).map(it => it.id === item.id ? ({ ...it, qty: newQty }) : it);
+                                        return { ...prev, items: newItems };
+                                      });
+                                      setEditedQtys(prev => ({ ...prev, [item.id]: newQty }));
+                                    }}
+                                    min="1"
+                                  />
                                 </td>
-                                <td className="border px-2 py-1 text-center" style={{ width: '1%' }}>
-                                  <div className="flex items-center justify-center w-full">
-                                    <span className="text-gray-700 font-bold flex-shrink-0">$&nbsp;</span>
-                                    <span className="text-right" style={{
-                                      width: `${Math.max((item.price ?? 0).toLocaleString('es-CL').length * 10, 80)}px`,
-                                      minWidth: '120px',
-                                      maxWidth: '220px',
-                                      display: 'inline-block'
-                                    }}>{item.price?.toLocaleString('es-CL') ?? '-'}</span>
-                                  </div>
+                                <td className="border-r border-gray-300 px-3 py-2 text-center">
+                                  {(item.measurement_unit ?? '').replace(/^unidad\s+/i, '')}
                                 </td>
-                                <td className="border px-2 py-1 text-center" style={{ width: '1%' }}>
-                                  <div className="flex items-center justify-center w-full">
-                                    <span className="text-gray-700 font-bold flex-shrink-0">$</span>
-                                    <span className="ml-1 text-right" style={{
-                                      width: `${Math.max((item.price ?? 0).toLocaleString('es-CL').length * 10, 80)}px`,
-                                      minWidth: '120px',
-                                      maxWidth: '220px',
-                                      display: 'inline-block'
-                                    }}>{item.price?.toLocaleString('es-CL') ?? '-'}</span>
-                                  </div>
-                                </td>
-                                <td className="border px-1 py-1 text-center w-32">
-                                  <div className="flex items-center justify-center w-full bg-gray-200/50 p-1 rounded">
-                                    <span className="text-gray-700 font-bold flex-shrink-0">$</span>
+                                <td className="border-r border-gray-300 px-2 py-2 text-center">
+                                  <div className="flex items-center justify-center gap-1 bg-blue-50 p-2 rounded border border-blue-200">
+                                    <span className="font-bold">$</span>
                                     <input
                                       type="text"
-                                      className="bg-transparent outline-none text-right"
-                                      style={{
-                                        width: `${Math.max((editedPrices[item.id] ?? item.update_price ?? item.price ?? 0).toLocaleString('es-CL').length * 10, 80)}px`,
-                                        minWidth: '110px',
-                                        maxWidth: '220px'
-                                      }}
-                                      value={((editedPrices[item.id] ?? item.update_price ?? item.price ?? 0) === 0 ? '0' : (editedPrices[item.id] ?? item.update_price ?? item.price ?? 0).toLocaleString('es-CL'))}
+                                      className="bg-transparent outline-none text-right text-xs"
+                                      style={{ width: '70px' }}
+                                      value={formatCLP(editedPrices[item.id] ?? item.update_price ?? item.price ?? 0)}
                                       onChange={e => {
                                         const raw = e.target.value.replace(/[^\d]/g, '');
                                         let valor = Math.round(Number(raw));
@@ -799,28 +1316,18 @@ export default function QuotesPage() {
                                     />
                                   </div>
                                 </td>
-                                <td className="border px-1 py-1 text-center w-32">
-                                  <div className="flex items-center justify-center w-full">
-                                    <span className="text-gray-700 font-bold flex-shrink-0">$</span>
-                                    <span className="text-right" style={{
-                                      width: `${Math.max((Math.round((editedPrices[item.id] ?? item.update_price ?? item.price ?? 0) * item.qty)).toLocaleString('es-CL').length * 10, 80)}px`,
-                                      minWidth: '110px',
-                                      maxWidth: '220px',
-                                      display: 'inline-block'
-                                    }}>{Math.round((editedPrices[item.id] ?? item.update_price ?? item.price ?? 0) * item.qty) === 0 ? '0' : Math.round((editedPrices[item.id] ?? item.update_price ?? item.price ?? 0) * item.qty).toLocaleString('es-CL')}</span>
+                                <td className="border-r border-gray-300 px-3 py-2 text-center">
+                                  <div className="flex items-center justify-center gap-1">
+                                    <span className="font-bold">$</span>
+                                    <span className="text-right">{formatCLP(Math.round((editedQuote.items?.find(it => it.id === item.id)?.qty ?? item.qty) * (editedPrices[item.id] ?? item.update_price ?? item.price ?? 0)))}</span>
                                   </div>
                                 </td>
-                                <td className="border px-1 py-1 text-center w-32">
-                                  <div className="flex items-center justify-center w-full  bg-gray-200/50 p-1 rounded">
+                                <td className="border-r border-gray-300 px-2 py-2 text-center">
+                                  <div className="flex items-center justify-center gap-1 bg-yellow-50 p-2 rounded border border-yellow-200">
                                     <input
                                       type="text"
-                                      className="bg-transparent outline-none text-center ml-1"
-                                      style={{
-                                        width: '70px',
-                                        minWidth: '60px',
-                                        maxWidth: '90px',
-                                        textAlign: 'center'
-                                      }}
+                                      className="bg-transparent outline-none text-center text-xs"
+                                      style={{ width: '45px' }}
                                       value={editedDiscounts[item.id] ?? item.discount ?? 0}
                                       onChange={e => {
                                         const raw = e.target.value.replace(/[^\d]/g, '');
@@ -831,103 +1338,88 @@ export default function QuotesPage() {
                                       }}
                                       inputMode="numeric"
                                     />
-                                    <span className="ml-1">%</span>
+                                    <span className="text-xs">%</span>
                                   </div>
                                 </td>
-                                
-                                <td className="border px-1 py-1 text-center w-32">
-                                  <div className="flex items-center justify-center w-full">
-                                    <span className="text-gray-700 font-bold flex-shrink-0">$</span>
-                                    <span className="text-right" style={{
-                                      width: (() => {
-                                        const total = (editedPrices[item.id] ?? item.update_price ?? item.price ?? 0) * item.qty;
-                                        const discount = editedDiscounts[item.id] ?? item.discount ?? 0;
-                                        const subtotal = Math.round(total - (total * (discount / 100)));
-                                        return `${Math.max(subtotal.toLocaleString('es-CL').length * 10, 80)}px`;
-                                      })(),
-                                      minWidth: '110px',
-                                      maxWidth: '220px',
-                                      display: 'inline-block'
-                                    }}>{(() => {
+                                <td className="px-3 py-2 text-center font-bold">
+                                  <div className="flex items-center justify-center gap-1">
+                                    <span className="font-bold">$</span>
+                                    <span className="text-right">{(() => {
                                       const total = (editedPrices[item.id] ?? item.update_price ?? item.price ?? 0) * item.qty;
                                       const discount = editedDiscounts[item.id] ?? item.discount ?? 0;
                                       const subtotal = Math.round(total - (total * (discount / 100)));
-                                      return subtotal === 0 ? '0' : subtotal.toLocaleString('es-CL');
+                                      return formatCLP(subtotal);
                                     })()}</span>
                                   </div>
                                 </td>
                               </tr>
                             );
                           })
-                        : selectedQuote.items?.map((item) => (
-                          <tr key={item.id}>
-                              <td className="border px-2 py-1 text-center" style={{ width: '1%' }}>
-                                <span className="text-right font-semibold" style={{
-                                  width: `${Math.max(String(item.product?.sku || item.product_id || '-').length * 9, 70)}px`,
-                                  minWidth: '70px',
-                                  maxWidth: '120px',
-                                  display: 'inline-block'
-                                }}>{String(item.product?.sku || item.product_id || '-')}</span>
+                        : editedQuote.items?.map((item) => (
+                          <tr key={item.id} className="border-b border-gray-300 hover:bg-gray-50 transition-colors">
+                              <td className="border-r border-gray-300 px-3 py-2 text-center font-semibold">
+                                {String(item.product?.sku || item.product_id || '-')}
                               </td>
-                              <td className="border px-2 py-1 text-left">{item.name}</td>
-                              <td className="border px-2 py-1 text-center" style={{ width: '1%' }}>
-                                <span className="text-right font-semibold" style={{
-                                  width: `${Math.max(String(item.qty).length * 10, 40)}px`,
-                                  minWidth: '40px',
-                                  maxWidth: '80px',
-                                  display: 'inline-block'
-                                }}>{item.qty}</span>
+                              <td className="border-r border-gray-300 px-3 py-2 text-left">
+                                <div style={{ whiteSpace: 'normal', wordBreak: 'break-word', overflowWrap: 'break-word', fontSize: '11px' }}>{item.name}</div>
                               </td>
-                              <td className="border px-2 py-1 text-center" style={{ width: '1%' }}>
-                                <span className="text-right font-semibold" style={{
-                                  width: `${Math.max((`${item.unit_size ?? ''} ${item.measurement_unit ?? ''}`).length * 8, 40)}px`,
-                                  minWidth: '40px',
-                                  maxWidth: '120px',
-                                  display: 'inline-block'
-                                }}>{item.unit_size} {item.measurement_unit}</span>
+                              <td className="border-r border-gray-300 px-3 py-2 text-center">
+                                <input
+                                  type="number"
+                                  className="w-full border border-gray-300 px-2 py-1 rounded text-xs text-center focus:outline-none focus:border-red-500 [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none [&]:appearance-none"
+                                  value={item.qty}
+                                  onChange={e => {
+                                    const newQty = Math.max(0, parseInt(e.target.value) || 0);
+                                    setEditedQuote(prev => {
+                                      if (!prev) return prev;
+                                      const newItems = (prev.items || []).map(it => it.id === item.id ? ({ ...it, qty: newQty }) : it);
+                                      return { ...prev, items: newItems };
+                                    });
+                                    setEditedQtys(prev => ({ ...prev, [item.id]: newQty }));
+                                  }}
+                                  min="1"
+                                />
                               </td>
-                              <td className="border px-2 py-1 text-center" style={{ width: '1%' }}>
-                                <div className="flex items-center justify-center w-full">
-                                  <span className="text-gray-700 font-bold flex-shrink-0">$</span>
-                                  <span className="ml-1 text-right" style={{
-                                    width: `${Math.max((item.price ?? 0).toLocaleString('es-CL').length * 10, 80)}px`,
-                                    minWidth: '110px',
-                                    maxWidth: '220px',
-                                    display: 'inline-block'
-                                  }}>{item.price?.toLocaleString('es-CL') ?? '-'}</span>
+                              <td className="border-r border-gray-300 px-3 py-2 text-center text-xs">
+                                {(item.measurement_unit ?? '').replace(/^unidad\s+/i, '')}
+                              </td>
+                              <td className="border-r border-gray-300 px-3 py-2 text-center">
+                                <div className="flex items-center justify-center gap-1">
+                                  <span className="font-bold">$</span>
+                                  <span className="text-right text-xs">{formatCLP(Math.round(item.qty * (editedPrices[item.id] ?? item.update_price ?? item.price ?? 0)))}</span>
                                 </div>
                               </td>
-                              <td className="border px-1 py-1 text-center w-24">
-                                <div className="flex items-center justify-center w-full">
-                                  <span className="text-gray-700 font-bold flex-shrink-0">$</span>
-                                  <span className="ml-1 text-right" style={{
-                                    width: `${Math.max((Math.round((editedPrices[item.id] ?? item.update_price ?? item.price ?? 0) * item.qty * 0.19)).toLocaleString('es-CL').length * 10, 80)}px`,
-                                    minWidth: '80px',
-                                    maxWidth: '120px',
-                                    display: 'inline-block'
-                                  }}>{Math.round((editedPrices[item.id] ?? item.update_price ?? item.price ?? 0) * item.qty * 0.19).toLocaleString('es-CL')}</span>
+                              <td className="border-r border-gray-300 px-3 py-2 text-center">
+                                <div className="flex items-center justify-center gap-1">
+                                  <span className="font-bold">$</span>
+                                  <span className="text-right text-xs">{item.price != null ? formatCLP(item.price) : '-'}</span>
                                 </div>
                               </td>
-                              <td className="border px-1 py-1 text-center w-32">
-                                <div className="flex items-center justify-center w-full">
-                                  <span className="text-gray-700 font-bold flex-shrink-0">$</span>
-                                  <span className="ml-1 text-right" style={{
-                                    width: `${Math.max((Math.round((editedPrices[item.id] ?? item.update_price ?? item.price ?? 0) * item.qty * 1.19)).toLocaleString('es-CL').length * 10, 80)}px`,
-                                    minWidth: '110px',
-                                    maxWidth: '220px',
-                                    display: 'inline-block'
-                                  }}>{Math.round((editedPrices[item.id] ?? item.update_price ?? item.price ?? 0) * item.qty * 1.19).toLocaleString('es-CL')}</span>
+                              <td className="border-r border-gray-300 px-3 py-2 text-center">
+                                <div className="flex items-center justify-center gap-1">
+                                  <span className="text-xs">-</span>
+                                </div>
+                              </td>
+                              <td className="px-3 py-2 text-center font-bold">
+                                <div className="flex items-center justify-center gap-1">
+                                  <span className="font-bold">$</span>
+                                  <span className="text-right text-xs">{formatCLP(Math.round((editedPrices[item.id] ?? item.update_price ?? item.price ?? 0) * item.qty))}</span>
                                 </div>
                               </td>
                             </tr>
                           ))}
                   </tbody>
                 </table>
+                </div>
               </div>
-              <div className="flex justify-end gap-2">
-                <button className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700" onClick={handleSavePrices}>Guardar precios</button>
-                <button className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700" onClick={() => setShowModal(false)}>Cerrar</button>
+
+              {/* Buttons section */}
+              <div className="flex justify-end gap-4 pt-4 mt-5 border-t border-gray-200">
+                <button className="px-6 py-2 bg-gray-300 text-gray-700 rounded-lg hover:bg-gray-400 font-medium text-sm transition-colors" onClick={() => setShowModal(false)}>Cancelar</button>
+                <button className="px-8 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 font-medium text-sm transition-colors shadow-md" onClick={handleSavePrices}>Guardar cambios</button>
               </div>
+
+              
             </div>
           </div>
       )}
@@ -953,7 +1445,7 @@ export default function QuotesPage() {
         >
           <div style={{ backgroundColor: 'rgba(0,0,0,0.60)', position: 'absolute', inset: 0 }} />
           <div
-            className="bg-white rounded-lg shadow-lg p-6 relative flex flex-col"
+            className="bg-white rounded-lg shadow-lg py-6 px-8 relative flex flex-col"
             style={{
               width: (() => {
                 const rect = visibleMainRect ?? mainRect;
@@ -970,15 +1462,14 @@ export default function QuotesPage() {
             }}
           >
             {/* (toast rendered globally) */}
-            <button className="absolute top-2 right-2 text-gray-500 hover:text-gray-700" onClick={() => setShowCreateModal(false)}>&times;</button>
-            <div className="flex items-center justify-between mb-4 border-b border-gray-300 pb-2">
+              <div className="flex items-center justify-between mb-4 border-b border-gray-300 pb-2 ">
               <h2 className="text-2xl font-normal text-gray-400 whitespace-nowrap">Crear Cotización</h2>
               {/* Improved stepper for modal steps */}
-              <div className="flex flex-col items-center w-full mt-2 mb-2">
+              <div className="flex flex-col items-center mt-2 mb-2">
                 <div className="flex items-center justify-center gap-6 mb-2">
                   {[
                     { key: 'client', label: 'Cliente' },
-                    { key: 'products', label: 'Productos' },
+                    { key: 'products', label: 'Servicios / Productos' },
                     { key: 'items', label: 'Preview' }
                   ].map((step, idx) => (
                     <div key={step.key} className="flex flex-col items-center">
@@ -998,6 +1489,8 @@ export default function QuotesPage() {
                   {createSection === 'products' && 'Agrega los productos que deseas cotizar.'}
                 </div>
               </div>
+
+              {/* Atrás rendered inline in footer (same row/height as Siguiente) */}
             </div>
             <div className="overflow-y-auto" style={{ flex: 1 }}>
 
@@ -1005,18 +1498,27 @@ export default function QuotesPage() {
               <div className="mb-4">
                 <style>{`.phone-wrapper .PhoneInputInput{border:none;outline:none;width:100%;background:transparent;padding:0;margin:0;font:inherit;} .phone-wrapper .PhoneInputCountry{margin-right:8px;} .phone-wrapper {display:block;} `}</style>
                 <div className="flex gap-2 items-end mb-2">
-                  <div className="flex-1">
+                  <div className="flex-1 relative">
                     <label className="block text-xs text-gray-600">Buscar cliente (empresa / email / documento)</label>
-                    <input className="border rounded px-2 py-1 w-full" value={clientSearchQuery} onChange={e => setClientSearchQuery(e.target.value)} />
-                  </div>
-                  <div>
-                    <button className="px-3 py-1 bg-gray-200 rounded" onClick={() => { setClientSearchQuery(''); setClientSearchResults([]); }}>Limpiar</button>
+                    <input
+                      className="border border-red-900 rounded px-2 py-1 w-full pr-8"
+                      value={clientSearchQuery}
+                      onChange={e => setClientSearchQuery(e.target.value)}
+                    />
+                    {clientSearchQuery && (
+                      <button
+                        className="absolute right-2 -translate-y-1/2 text-gray-300 hover:text-gray-500 text-3xl flex items-center justify-center"
+                        style={{ top: '65%' }}
+                        onClick={() => { setClientSearchQuery(''); setClientSearchResults([]); }}
+                        aria-label="Limpiar búsqueda cliente"
+                      >&times;</button>
+                    )}
                   </div>
                 </div>
 
                 {clientSearchResults && clientSearchResults.length > 0 ? (
-                  <div className="space-y-2 mb-2">
-                    <div className="text-sm text-gray-600">Clientes encontrados:</div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-2 mb-2">
+                    <div className="text-sm text-gray-600 col-span-full">Clientes encontrados:</div>
                     {clientSearchResults.map((c, i) => (
                       <div key={i} className="flex items-center justify-between border rounded p-2">
                           <div className="text-sm">
@@ -1043,6 +1545,25 @@ export default function QuotesPage() {
                               }
                             }));
                             setSelectedClientId(c.id);
+                            // Store a normalized snapshot in originalClient so comparisons
+                            // with the form don't produce false positives due to formatting.
+                            setOriginalClient({
+                              ...c,
+                              company: String(c.company || '').toUpperCase(),
+                              contact_name: capitalizeName(String(c.contact_name || '')),
+                              email: String(c.email || '').toLowerCase(),
+                              phone: c.phone || null,
+                              document: c.document || null,
+                              company_address: c.company_address || null,
+                              country: c.country || 'CL',
+                              region: c.region || '',
+                              city: c.city || '',
+                              postal_code: c.postal_code || '',
+                              notes: c.notes || ''
+                            });
+                            setClientSearchQuery('');
+                            setClientSearchResults([]);
+                            setCreateSection('client');
                             setClientErrors({});
                             // Mostrar alerta personalizada temporal
                             setToast({ type: 'success', message: 'Cliente seleccionado' });
@@ -1053,44 +1574,13 @@ export default function QuotesPage() {
                     ))}
                   </div>
                 ) : (
-                  <div className="mb-2 text-sm text-gray-500">No se han encontrado clientes</div>
+                  (clientSearchQuery && clientSearchQuery.trim().length >= 3) ? (
+                    <div className="mb-2 text-sm text-gray-500">No se han encontrado clientes</div>
+                  ) : null
                 )}
-                {/* Lista compacta de productos agregados (vista tipo cotización) debajo de Crear producto */}
-                <div className="mb-4">
-                  <h4 className="font-semibold text-sm mb-2">Productos en la cotización</h4>
-                  <div className="space-y-2">
-                    {createForm.items && createForm.items.length > 0 ? (
-                      createForm.items.map((it: any, idx: number) => (
-                        <div key={it.id || idx} className="flex items-center gap-3 p-2 border rounded bg-white">
-                          <div className="w-12 h-12 flex items-center justify-center bg-gray-50 border rounded">
-                            {it.image_url ? (
-                              <Image src={String(it.image_url)} alt={it.name} width={40} height={40} className="object-contain" />
-                            ) : (
-                              <div className="text-xs text-gray-400">Sin imagen</div>
-                            )}
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <div className="text-sm font-medium truncate">{it.name}</div>
-                            <div className="text-xs text-gray-500">{it.sku || it.product_id || ''}</div>
-                          </div>
-                          <div className="w-28">
-                            <input type="number" min={1} className="border rounded px-2 py-1 w-full text-sm" value={it.qty} onChange={e => updateCreateItem(idx, 'qty', Number(e.target.value))} />
-                          </div>
-                          <div className="w-36">
-                            <input type="number" min={0} className="border rounded px-2 py-1 w-full text-sm" value={it.price} onChange={e => updateCreateItem(idx, 'price', Number(e.target.value))} />
-                          </div>
-                          <div>
-                            <button className="px-2 py-1 bg-red-600 text-white rounded text-sm" onClick={() => removeCreateItem(idx)}>Eliminar</button>
-                          </div>
-                        </div>
-                      ))
-                    ) : (
-                      <div className="text-sm text-gray-500">No hay productos agregados a la cotización</div>
-                    )}
-                  </div>
-                </div>
+                {/* Productos añadidos se muestran sólo en el paso 'products' */}
 
-                <div className="grid grid-cols-2 gap-4 mb-2">
+                <div className="grid grid-cols-2 gap-4 mb-2 mt-12">
                   <div>
                     <label className="block text-xs text-gray-600">Empresa</label>
                     <input className="border rounded px-2 py-1 w-full" value={createForm.contact.company} onChange={e => setCreateForm((p:any) => ({ ...p, contact: { ...p.contact, company: String(e.target.value || '').toUpperCase() } }))} />
@@ -1098,21 +1588,47 @@ export default function QuotesPage() {
 
                   <div>
                     <label className="block text-xs text-gray-600">Documento (RUT)</label>
-                    <input className="border rounded px-2 py-1 w-full" value={createForm.contact.document} onChange={e => setCreateForm((p:any) => ({ ...p, contact: { ...p.contact, document: e.target.value } }))} onBlur={() => {
-                      const val = String(createForm.contact.document || '').trim();
-                      if (val) {
-                        const ok = validateRUT(val);
-                        if (!ok) setClientErrors(prev => ({ ...prev, document: 'RUT inválido (formato Chile)' }));
-                        else setClientErrors(prev => { const n = { ...prev }; delete n.document; return n; });
-                        if (ok) {
-                          const cleaned = cleanRUT(val);
-                          const body = cleaned.slice(0, -1);
-                          const dv = cleaned.slice(-1);
-                          const withDots = body.replace(/\B(?=(\d{3})+(?!\d))/g, '.');
-                          setCreateForm((p:any) => ({ ...p, contact: { ...p.contact, document: `${withDots}-${dv}` } }));
+                    <input
+                      className="border rounded px-2 py-1 w-full"
+                      value={createForm.contact.document}
+                      onChange={e => {
+                        const newValRaw = String(e.target.value || '');
+                        const prevVal = String(createForm.contact.document || '');
+                        // If previous value was a valid formatted RUT and the user changed it
+                        // and the new value is not a valid RUT, strip Chile formatting (dots/dash)
+                        const prevWasFormatted = Boolean(prevVal) && validateRUT(prevVal) && (prevVal.includes('.') || prevVal.includes('-'));
+                        const newIsValid = validateRUT(newValRaw);
+                        if (prevWasFormatted && !newIsValid) {
+                          const cleaned = cleanRUT(newValRaw);
+                          setCreateForm((p:any) => ({ ...p, contact: { ...p.contact, document: cleaned } }));
+                          // clear any document error while editing
+                          setClientErrors(prev => { const n = { ...prev }; delete n.document; return n; });
+                          return;
                         }
-                      }
-                    }} />
+                        // Default: store raw input value
+                        setCreateForm((p:any) => ({ ...p, contact: { ...p.contact, document: newValRaw } }));
+                        setClientErrors(prev => { const n = { ...prev }; delete n.document; return n; });
+                      }}
+                      onBlur={() => {
+                        const val = String(createForm.contact.document || '').trim();
+                        if (val) {
+                          const ok = validateRUT(val);
+                          if (!ok) setClientErrors(prev => ({ ...prev, document: 'RUT inválido (formato Chile)' }));
+                          else setClientErrors(prev => { const n = { ...prev }; delete n.document; return n; });
+                          if (ok) {
+                            const cleaned = cleanRUT(val);
+                            const body = cleaned.slice(0, -1);
+                            const dv = cleaned.slice(-1);
+                            const withDots = body.replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+                            setCreateForm((p:any) => ({ ...p, contact: { ...p.contact, document: `${withDots}-${dv}` } }));
+                          } else {
+                            // if invalid, ensure no Chile punctuation remains
+                            const cleaned = cleanRUT(val);
+                            setCreateForm((p:any) => ({ ...p, contact: { ...p.contact, document: cleaned } }));
+                          }
+                        }
+                      }}
+                    />
                     {clientErrors.document && <div className="text-xs text-red-600 mt-1">{clientErrors.document}</div>}
                   </div>
 
@@ -1200,23 +1716,43 @@ export default function QuotesPage() {
                 </div>
 
                 <div className="flex gap-2 justify-end">
-                  <button className="px-3 py-1 bg-gray-300 rounded" onClick={() => { setSelectedClientId(null); setCreateForm((p:any) => ({ ...p, contact: { company: '', contact_name: '', email: '', phone: '', document: '', company_address: '', country: 'CL', region: '', city: '', postal_code: '', notes: '' } })); setClientErrors({}); }}>Limpiar</button>
-                  <button
-                    className={`px-3 py-1 text-white rounded ${selectedClientId ? 'bg-green-600 hover:bg-green-700' : 'bg-gray-500 hover:bg-gray-700'}`}
-                    onClick={async () => {
-                      if (!clientIsValid) { validateClientFields(); return; }
-                      // If no client selected, create it on first click
-                      if (!selectedClientId) {
+                  <button className="px-3 py-1 bg-gray-300 hover:bg-gray-600 hover:text-white rounded" onClick={() => { setSelectedClientId(null); setCreateForm((p:any) => ({ ...p, contact: { company: '', contact_name: '', email: '', phone: '', document: '', company_address: '', country: 'CL', region: '', city: '', postal_code: '', notes: '' } })); setClientErrors({}); }}>Limpiar</button>
+                  {selectedClientId && originalClient && clientFieldsChanged(originalClient, createForm.contact) && (
+                    <button
+                      className={`px-3 py-1 text-white rounded bg-blue-600 hover:bg-blue-700 ${updatingClient ? 'opacity-60' : ''}`}
+                      onClick={async () => {
+                        if (!selectedClientId) return;
+                        setUpdatingClient(true);
+                        try {
+                          const payload: any = { id: selectedClientId, ...createForm.contact };
+                          const res = await fetch('/api/clients', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+                          if (!res.ok) throw new Error('Update failed');
+                          setToast({ type: 'success', message: 'Cliente actualizado' });
+                          setOriginalClient({ ...originalClient, ...createForm.contact });
+                          setTimeout(() => setToast(null), 2000);
+                        } catch (e) {
+                          console.error('Error updating client', e);
+                          setToast({ type: 'error', message: 'Error al actualizar cliente' });
+                          setTimeout(() => setToast(null), 2000);
+                        } finally { setUpdatingClient(false); }
+                      }}
+                    >{updatingClient ? 'Actualizando...' : 'Actualizar cliente'}</button>
+                  )}
+                  {/* Keep explicit 'Crear cliente' here only when no client is selected. The 'Siguiente' action
+                      for the client step is rendered in the modal footer so it shares position with section 2. */}
+                  {!selectedClientId && (
+                    <button
+                      className={`px-3 py-1 text-white rounded ${creatingClient ? 'opacity-60 bg-gray-500' : 'bg-gray-500 hover:bg-gray-700'}`}
+                      onClick={async () => {
+                        // No client selected: validate and create (keeps previous behavior: does not auto-advance)
+                        if (!clientIsValid) { validateClientFields(); return; }
                         const ok = await handleCreateClient();
                         if (!ok) return;
-                        // client created successfully — do not auto-advance, button will now show 'Siguiente' and be green
                         return;
-                      }
-                      // If client already selected, advance to next section
-                      setCreateSection('products');
-                    }}
-                    disabled={!clientIsValid || creatingClient}
-                  >{creatingClient ? 'Procesando...' : (selectedClientId ? 'Siguiente' : 'Crear cliente')}</button>
+                      }}
+                      disabled={creatingClient}
+                    >{creatingClient ? 'Procesando...' : 'Crear cliente'}</button>
+                  )}
                 </div>
               </div>
             )}
@@ -1227,18 +1763,26 @@ export default function QuotesPage() {
                   </div>
                 <div className="flex gap-2 items-end mb-2">
                   <div className="flex-1 relative">
-                    <label className="block text-sm text-gray-600">Buscar productos</label>
-                    <input className="border rounded px-2 py-1 w-full pr-8" value={productSearchQuery} onChange={e => setProductSearchQuery(e.target.value)} placeholder="Busca por nombre, SKU, descripción, fabricante..." />
+                    <label className="block text-sm text-gray-600">Buscar Material - Servicios</label>
+                    <input
+                      ref={productSearchRef}
+                      type="text"
+                      className="border border-red-800 rounded px-2 py-1 w-full pr-8 mb-4"
+                      value={productSearchQuery}
+                      onChange={e => setProductSearchQuery(e.target.value)}
+                      placeholder="Busca por nombre, SKU, descripción, fabricante..."
+                    />
                     {productSearchQuery && (
                       <button
-                        className="absolute right-2 bottom-1.5 text-gray-500 hover:text-gray-700"
+                        className="absolute right-2 -translate-y-1/2 text-gray-300 hover:text-gray-500 text-3xl flex items-center justify-center"
+                        style={{ top: '53%' }}
                         onClick={() => { setProductSearchQuery(''); setProductSearchResults([]); }}
                         aria-label="Limpiar búsqueda"
                       >&times;</button>
                     )}
                   </div>
                 </div>
-                {productSearchResults && productSearchResults.length > 0 ? (
+                {productSearchQuery && productSearchQuery.trim().length >= 3 && productSearchResults && productSearchResults.length > 0 ? (
                   <div className="mb-2">
                     <div className="text-sm text-gray-600 mb-2">Resultados encontrados:</div>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -1286,8 +1830,82 @@ export default function QuotesPage() {
                     </div>
                   </div>
                 ) : (
-                  <div className="mb-2 text-sm text-gray-500">No se encontraron productos</div>
+                  (productSearchQuery && productSearchQuery.trim().length >= 3) && (
+                    <div className="mb-2 text-sm text-gray-500">No se encontraron coincidencias</div>
+                  )
                 )}
+
+                {/* Descripción de la cotización */}
+                <div className="mb-4 mt-12">
+                  <label className="block text-sm font-semibold text-gray-700 mb-1">Descripción</label>
+                  <textarea
+                    ref={descriptionRef}
+                    className="border rounded px-3 py-2 w-full text-sm resize-none max-h-[60vh] overflow-auto"
+                    rows={1}
+                    placeholder="Descripción o notas para esta cotización..."
+                    value={createForm.description || ''}
+                    onChange={e => setCreateForm((p:any) => ({ ...p, description: e.target.value }))}
+                  />
+                </div>
+
+                {/* Nuevos campos solicitados: Tiempo de ejecución / entrega y Forma de pago */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-1">Tiempo de ejecución / entrega</label>
+                    <div className="relative group">
+                      <button
+                        onClick={() => {
+                          const dateRange = createForm.execution_time?.split('|') || [];
+                          const tempStart = dateRange[0] || '';
+                          const tempEnd = dateRange[1] || '';
+                          (window as any).__dateStart = tempStart;
+                          (window as any).__dateEnd = tempEnd;
+                          setDateStart(tempStart);
+                          setDateEnd(tempEnd);
+                          setShowDateModal(true);
+                        }}
+                        className="mt-0 w-full flex items-center justify-center border border-gray-300 px-3 py-2 rounded text-sm focus:outline-none focus:border-red-500 focus:ring-1 focus:ring-red-200 bg-white hover:bg-gray-50 transition text-gray-700 font-medium"
+                        aria-label="Seleccionar rango de fechas"
+                      >
+                        {createForm.execution_time ? (() => {
+                          const dates = createForm.execution_time.split('|');
+                          if (dates.length === 2 && dates[0] && dates[1]) {
+                            const start = new Date(dates[0]);
+                            const end = new Date(dates[1]);
+                            const diffMs = end.getTime() - start.getTime();
+                            const days = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+                            return `${days} ${days === 1 ? 'día' : 'días'}`;
+                          }
+                          return 'Rango';
+                        })() : 'Seleccionar rango de fechas'}
+                      </button>
+
+                      <div className="absolute left-1/2 -translate-x-1/2 bottom-full mb-2 w-max max-w-xs hidden group-hover:block z-50">
+                        <div className="bg-white border border-gray-300 rounded p-3 text-sm shadow-lg text-gray-800">
+                          {createForm.execution_time ? (() => {
+                            const dates = createForm.execution_time.split('|');
+                            if (dates.length === 2 && dates[0] && dates[1]) {
+                              const start = new Date(dates[0]);
+                              const end = new Date(dates[1]);
+                              return <div className="whitespace-nowrap font-medium">{start.toLocaleDateString()} → {end.toLocaleDateString()}</div>;
+                            }
+                            return <div className="text-gray-500">Sin rango</div>;
+                          })() : <div className="text-gray-500">Sin rango</div>}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-1">Forma de pago (cliente)</label>
+                    <input
+                      type="text"
+                      className="border rounded px-3 py-2 w-full text-sm"
+                      placeholder="Ej: 30 días, contado, transferencia"
+                      value={createForm.payment_method || ''}
+                      onChange={e => setCreateForm((p:any) => ({ ...p, payment_method: e.target.value }))}
+                    />
+                  </div>
+                </div>
 
                 {/* Lista de productos añadidos para cotización */}
                 {createForm.items && createForm.items.length > 0 && (
@@ -1296,15 +1914,16 @@ export default function QuotesPage() {
                     <table className="min-w-full text-xs border">
                       <thead className="bg-gray-100">
                         <tr>
-                          <th className="px-2 py-1 border">Código</th>
+                          <th className="px-2 py-1 border whitespace-nowrap">Código</th>
                           <th className="px-2 py-1 border">Características</th>
-                          <th className="px-2 py-1 border">Cantidad</th>
-                          <th className="px-2 py-1 border">Unidad</th>
-                          <th className="px-2 py-1 border">Precio estimado</th>
-                          <th className="px-2 py-1 border">Valor producto</th>
-                          <th className="px-2 py-1 border">Subtotal productos</th>
-                          <th className="px-2 py-1 border">Descuento %</th>
-                          <th className="px-2 py-1 border">Subtotal</th>
+                          <th className="px-2 py-1 border whitespace-nowrap">Cantidad</th>
+                          <th className="px-2 py-1 border whitespace-nowrap">Unidad</th>
+                          <th className="px-2 py-1 border whitespace-nowrap">Precio estimado</th>
+                          <th className="px-2 py-1 border whitespace-nowrap">Valor U</th>
+                          <th className="px-2 py-1 border whitespace-nowrap">Valor U x C</th>
+                          <th className="px-2 py-1 border whitespace-nowrap">Desc. %</th>
+                          <th className="px-2 py-1 border whitespace-nowrap">Subtotal</th>
+                          <th className="px-2 py-1 border text-center">Acciones</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -1322,15 +1941,15 @@ export default function QuotesPage() {
                                 <div className="font-semibold">{it.name}</div>
                                 <div className="text-xs text-gray-500">{Array.isArray(it.characteristics) ? it.characteristics.join(', ') : (it.characteristics || '-')}</div>
                               </td>
-                              <td className="px-2 py-1 border text-center">
+                              <td className="px-2 py-1 border text-center whitespace-nowrap">
                                 <div className="flex items-center justify-center">
                                   <input
                                     type="text"
                                     inputMode="numeric"
                                     pattern="[0-9]*"
                                     min={1}
-                                    className="bg-gray-100 px-2 py-1 w-14 text-center appearance-none outline-none"
-                                    style={{ border: 'none', borderRadius: '6px' }}
+                                    className="bg-gray-100 px-2 py-1 text-center appearance-none outline-none"
+                                    style={{ border: 'none', borderRadius: '6px', width: `${Math.max(String(qty).length * 12, 48)}px` }}
                                     value={qty}
                                     onChange={e => {
                                       const raw = e.target.value.replace(/[^0-9]/g, '');
@@ -1343,8 +1962,8 @@ export default function QuotesPage() {
                                 </div>
                               </td>
                               <td className="px-2 py-1 border text-center">{it.measurement_unit || '-'}</td>
-                              <td className="px-2 py-1 border text-right">$ {priceUnit.toLocaleString()}</td>
-                              <td className="px-2 py-1 border text-right">
+                              <td className="px-2 py-1 border text-right">$ {formatCLP(priceUnit)}</td>
+                              <td className="px-2 py-1 border text-right whitespace-nowrap">
                                 <div className="flex items-center justify-center">
                                   <span className="text-gray-700 font-bold flex-shrink-0 mr-1">$</span>
                                   <input
@@ -1352,11 +1971,10 @@ export default function QuotesPage() {
                                     inputMode="numeric"
                                     pattern="[0-9]*"
                                     min={0}
-                                    className="bg-gray-100 px-2 py-1 w-20 text-center appearance-none outline-none"
-                                    style={{ border: 'none', borderRadius: '6px' }}
-                                    value={valorProducto.toLocaleString('es-CL')}
+                                    className="bg-gray-100 px-2 py-1 text-center appearance-none outline-none"
+                                    style={{ border: 'none', borderRadius: '6px', width: `${Math.max(String(formatCLP(valorProducto)).length * 10, 64)}px` }}
+                                    value={formatCLP(valorProducto)}
                                     onChange={e => {
-                                      // Eliminar caracteres no numéricos
                                       const raw = e.target.value.replace(/[^0-9]/g, '');
                                       const value = Number(raw);
                                       const items = [...createForm.items];
@@ -1366,8 +1984,8 @@ export default function QuotesPage() {
                                   />
                                 </div>
                               </td>
-                              <td className="px-2 py-1 border text-right">$ {price.toLocaleString()}</td>
-                              <td className="px-2 py-1 border text-right">
+                              <td className="px-2 py-1 border text-right whitespace-nowrap">$ {formatCLP(price)}</td>
+                              <td className="px-2 py-1 border text-right whitespace-nowrap">
                                 <div className="flex items-center justify-center">
                                   <input
                                     type="text"
@@ -1375,8 +1993,8 @@ export default function QuotesPage() {
                                     pattern="[0-9]*"
                                     min={0}
                                     max={100}
-                                    className="bg-gray-100 px-2 py-1 w-14 text-center appearance-none outline-none"
-                                    style={{ border: 'none', borderRadius: '6px' }}
+                                    className="bg-gray-100 px-2 py-1 text-center appearance-none outline-none"
+                                    style={{ border: 'none', borderRadius: '6px', width: `${Math.max(String(discount).length * 12, 48)}px` }}
                                     value={discount}
                                     onChange={e => {
                                       const raw = e.target.value.replace(/[^0-9]/g, '');
@@ -1389,7 +2007,19 @@ export default function QuotesPage() {
                                   <span className="ml-1">%</span>
                                 </div>
                               </td>
-                              <td className="px-2 py-1 border text-right">$ {Math.round(subtotal).toLocaleString()}</td>
+                              <td className="px-2 py-1 border text-right whitespace-nowrap">$ {formatCLP(Math.round(subtotal))}</td>
+                              <td className="px-2 py-1 border text-center">
+                                <button
+                                  onClick={() => removeCreateItem(idx)}
+                                  className="text-red-600 hover:text-red-800 hover:bg-red-50 rounded px-2 py-1 transition-colors"
+                                  title="Eliminar item"
+                                  aria-label="Eliminar item"
+                                >
+                                  <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 inline" viewBox="0 0 20 20" fill="currentColor">
+                                    <path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clipRule="evenodd" />
+                                  </svg>
+                                </button>
+                              </td>
                             </tr>
                           );
                         })}
@@ -1419,19 +2049,19 @@ export default function QuotesPage() {
                               <tbody>
                                 <tr>
                                   <td style={{ fontWeight: 'normal', padding: '8px 0 4px 16px', fontSize: '0.95rem' }}>Total Neto Sin Descuento:</td>
-                                  <td style={{ textAlign: 'right', fontWeight: 'normal', padding: '8px 16px 4px 0', fontSize: '0.95rem' }}>$ {netoSinDescuento.toLocaleString('es-CL')}</td>
+                                  <td style={{ textAlign: 'right', fontWeight: 'normal', padding: '8px 16px 4px 0', fontSize: '0.95rem' }}>$ {formatCLP(netoSinDescuento)}</td>
                                 </tr>
                                 <tr style={{ background: '#f7f7f7' }}>
                                   <td style={{ fontWeight: 'normal', padding: '4px 0 4px 16px', fontSize: '0.95rem' }}>Total Neto:</td>
-                                  <td style={{ textAlign: 'right', fontWeight: 'normal', padding: '4px 16px 4px 0', fontSize: '0.95rem' }}>$ {netoConDescuento.toLocaleString('es-CL')}</td>
+                                  <td style={{ textAlign: 'right', fontWeight: 'normal', padding: '4px 16px 4px 0', fontSize: '0.95rem' }}>$ {formatCLP(netoConDescuento)}</td>
                                 </tr>
                                 <tr>
                                   <td style={{ fontWeight: 'normal', padding: '4px 0 4px 16px', fontSize: '0.95rem' }}>IVA (19%):</td>
-                                  <td style={{ textAlign: 'right', fontWeight: 'normal', padding: '4px 16px 4px 0', fontSize: '0.95rem' }}>$ {iva.toLocaleString('es-CL')}</td>
+                                  <td style={{ textAlign: 'right', fontWeight: 'normal', padding: '4px 16px 4px 0', fontSize: '0.95rem' }}>$ {formatCLP(iva)}</td>
                                 </tr>
                                 <tr>
                                                                    <td style={{ fontWeight: 'bold', padding: '4px 0 8px 16px', fontSize: '1rem', color: '#a62626' }}>TOTAL:</td>
-                                  <td style={{ textAlign: 'right', fontWeight: 'bold', padding: '4px 16px 8px 0', fontSize: '1rem', color: '#a62626' }}>$ {total.toLocaleString('es-CL')}</td>
+                                  <td style={{ textAlign: 'right', fontWeight: 'bold', padding: '4px 16px 8px 0', fontSize: '1rem', color: '#a62626' }}>$ {formatCLP(total)}</td>
                                 </tr>
                               </tbody>
                             </table>
@@ -1468,9 +2098,9 @@ export default function QuotesPage() {
                     </button>
                   )}
                 </div>
-                <div className="mb-2 text-center text-xs font-normal text-gray-400">Crear Producto</div>
+                <div className="mb-2 text-center text-xs font-normal text-gray-400">Crear Material - Servicio</div>
                 {productPanelOpen && (
-                  <div className="mb-2 mt-16">
+                  <div className="mb-2 mt-2">
                     <ProductCreateForm
                       matchingProducts={productSearchResults}
                       showMatches={showMatches}
@@ -1510,17 +2140,42 @@ export default function QuotesPage() {
                       setShowCreateForm={setShowCreateModal}
                       setShowMatches={setShowMatches}
                       PhotoIcon={PhotoIcon}
+                      onProductCreated={(createdProduct) => {
+                        if (!createdProduct) return;
+                        setCreateForm((prev: any) => ({
+                          ...prev,
+                          items: [
+                            ...prev.items,
+                            {
+                              id: createdProduct.id || `tmp-${Date.now()}-${Math.floor(Math.random()*1000)}`,
+                              quote_id: '',
+                              product_id: String(createdProduct.id || createdProduct.sku || createdProduct.name),
+                              sku: createdProduct.sku || '',
+                              name: createdProduct.name || '',
+                              image_url: Array.isArray(createdProduct.image_url) ? (createdProduct.image_url[0] || null) : (createdProduct.image_url || null),
+                              unit_size: createdProduct.unit_size || null,
+                              measurement_unit: createdProduct.measurement_unit || null,
+                              qty: 1,
+                              price: typeof createdProduct.price === 'number' ? createdProduct.price : 0,
+                              update_price: typeof createdProduct.price === 'number' ? createdProduct.price : 0,
+                              discount: 0,
+                              company: null,
+                              email: null,
+                              phone: null,
+                              document: null,
+                              created_at: null,
+                              characteristics: createdProduct.characteristics || null,
+                              product: createdProduct
+                            }
+                          ]
+                        }));
+                        setToast({ type: 'success', message: 'Producto creado y añadido a lista' });
+                        setTimeout(() => setToast(null), 2500);
+                      }}
                     />
                   </div>
                 )}
-                <div className="flex justify-end mt-6">
-                  <button
-                    className="px-4 py-2 bg-gray-500 text-white rounded hover:bg-gray-600"
-                    onClick={() => setCreateSection('items')}
-                  >
-                    Siguiente
-                  </button>
-                </div>
+                {/* Siguiente moved to modal footer so it aligns with Atrás */}
               </div>
             )}
             {/* Items: sólo visible en el paso 'items' */}
@@ -1528,7 +2183,7 @@ export default function QuotesPage() {
               <div className="mb-4">
                 <h3 className="text-lg font-bold mb-2 text-red-700">Enviar cotización</h3>
                 {/* PDF Preview */}
-                <div className="mb-6 border rounded-lg shadow p-6 bg-white" style={{maxWidth:'800px',margin:'0 auto'}}>
+                <div className="mb-6 border rounded-lg shadow p-6 bg-white" style={{maxWidth:'1200px',margin:'0 auto'}}>
                   <div className="flex items-center justify-between mb-2">
                     <div className="font-bold text-xl text-red-700">Cotización Fasercon</div>
                     <div className="text-xs text-gray-500">{new Date().toLocaleDateString('es-CL')}</div>
@@ -1559,13 +2214,32 @@ export default function QuotesPage() {
                       <div>{createForm.contact.company_address || '-'}</div>
                     </div>
                   </div>
+                  {/* Descripción de la cotización */}
+                  <div className="mb-4 pb-2 border-b">
+                    <div className="font-semibold text-gray-700 mb-1">Descripción</div>
+                    <div className="text-sm text-gray-800 whitespace-pre-wrap max-h-[60vh] overflow-auto">{createForm.description || '(vacío)'}</div>
+                  </div>
+                  {(createForm.execution_time || createForm.payment_method) && (
+                    <div className="mb-4 pb-2 border-b">
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                          <div className="font-semibold text-gray-700">Tiempo de ejecución / entrega</div>
+                          <div className="text-sm text-gray-800">{createForm.execution_time || '-'}</div>
+                        </div>
+                        <div>
+                          <div className="font-semibold text-gray-700">Forma de pago</div>
+                          <div className="text-sm text-gray-800">{createForm.payment_method || '-'}</div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
                   <div className="mb-2">
-                    <div className="font-semibold text-gray-700 mb-2">Productos</div>
+                    <div className="font-semibold text-gray-700 mb-2">Servicios / Productos</div>
                     <table className="min-w-full text-xs border">
                       <thead className="bg-gray-100">
                         <tr>
                           <th className="px-2 py-1 border">Código</th>
-                          <th className="px-2 py-1 border">Nombre</th>
+                          <th className="px-2 py-1 border max-w-[220px]">Nombre</th>
                           <th className="px-2 py-1 border">Características</th>
                           <th className="px-2 py-1 border">Cantidad</th>
                           <th className="px-2 py-1 border">Unidad</th>
@@ -1585,13 +2259,13 @@ export default function QuotesPage() {
                           return (
                             <tr key={idx} className="border-b">
                               <td className="px-2 py-1 border text-center">{it.sku || '-'}</td>
-                              <td className="px-2 py-1 border">{it.name}</td>
+                              <td className="px-2 py-1 border max-w-[220px] whitespace-normal break-words">{it.name}</td>
                               <td className="px-2 py-1 border">{Array.isArray(it.characteristics) ? it.characteristics.join(', ') : (it.characteristics || '-')}</td>
                               <td className="px-2 py-1 border text-center">{qty}</td>
                               <td className="px-2 py-1 border text-center">{it.unit_size || '-'} {it.measurement_unit || ''}</td>
-                              <td className="px-2 py-1 border text-right">$ {valorProducto.toLocaleString('es-CL')}</td>
+                              <td className="px-2 py-1 border text-right">$ {formatCLP(valorProducto)}</td>
                               <td className="px-2 py-1 border text-right">{discount}%</td>
-                              <td className="px-2 py-1 border text-right">$ {Math.round(subtotal).toLocaleString('es-CL')}</td>
+                              <td className="px-2 py-1 border text-right">$ {formatCLP(Math.round(subtotal))}</td>
                             </tr>
                           );
                         }) : (
@@ -1623,19 +2297,19 @@ export default function QuotesPage() {
                             <tbody>
                               <tr>
                                 <td style={{ fontWeight: 'normal', padding: '8px 0 4px 16px', fontSize: '0.95rem' }}>Total Neto Sin Descuento:</td>
-                                <td style={{ textAlign: 'right', fontWeight: 'normal', padding: '8px 16px 4px 0', fontSize: '0.95rem' }}>$ {netoSinDescuento.toLocaleString('es-CL')}</td>
+                                <td style={{ textAlign: 'right', fontWeight: 'normal', padding: '8px 16px 4px 0', fontSize: '0.95rem' }}>$ {formatCLP(netoSinDescuento)}</td>
                               </tr>
                               <tr style={{ background: '#f7f7f7' }}>
                                 <td style={{ fontWeight: 'normal', padding: '4px 0 4px 16px', fontSize: '0.95rem' }}>Total Neto:</td>
-                                <td style={{ textAlign: 'right', fontWeight: 'normal', padding: '4px 16px 4px 0', fontSize: '0.95rem' }}>$ {netoConDescuento.toLocaleString('es-CL')}</td>
+                                <td style={{ textAlign: 'right', fontWeight: 'normal', padding: '4px 16px 4px 0', fontSize: '0.95rem' }}>$ {formatCLP(netoConDescuento)}</td>
                               </tr>
                               <tr>
                                 <td style={{ fontWeight: 'normal', padding: '4px 0 4px 16px', fontSize: '0.95rem' }}>IVA (19%):</td>
-                                <td style={{ textAlign: 'right', fontWeight: 'normal', padding: '4px 16px 4px 0', fontSize: '0.95rem' }}>$ {iva.toLocaleString('es-CL')}</td>
+                                <td style={{ textAlign: 'right', fontWeight: 'normal', padding: '4px 16px 4px 0', fontSize: '0.95rem' }}>$ {formatCLP(iva)}</td>
                               </tr>
                               <tr>
                                 <td style={{ fontWeight: 'bold', padding: '4px 0 8px 16px', fontSize: '1rem', color: '#a62626' }}>TOTAL:</td>
-                                <td style={{ textAlign: 'right', fontWeight: 'bold', padding: '4px 16px 8px 0', fontSize: '1rem', color: '#a62626' }}>$ {total.toLocaleString('es-CL')}</td>
+                                <td style={{ textAlign: 'right', fontWeight: 'bold', padding: '4px 16px 8px 0', fontSize: '1rem', color: '#a62626' }}>$ {formatCLP(total)}</td>
                               </tr>
                             </tbody>
                           </table>
@@ -1652,9 +2326,23 @@ export default function QuotesPage() {
               </div>
             )}
             </div>
-            <div className="mt-auto pt-4 pb-4">
-              <div className="flex items-center justify-center gap-3">
-                <div className="flex flex-col items-center">
+            <div className="mt-auto pt-4 pb-0">
+              <div className="flex flex-row gap-3 w-full">
+                {/* Left: Atrás */}
+                <div className="flex items-center flex-1">
+                  {createSection !== 'client' && (
+                    <button
+                      className="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700 mr-2"
+                      onClick={() => {
+                        if (createSection === 'items') setCreateSection('products');
+                        else if (createSection === 'products') setCreateSection('client');
+                      }}
+                    >Atrás</button>
+                  )}
+                </div>
+
+                {/* Center: Cancelar */}
+                <div className="flex items-center justify-center flex-1">
                   <button
                     className="px-4 py-2 bg-gray-200 hover:bg-gray-600 hover:text-white rounded"
                     type="button"
@@ -1668,261 +2356,335 @@ export default function QuotesPage() {
                       }
                     }}
                   >Cancelar</button>
+                  {showCancelConfirm && (
+                    <>
+                      <div className="fixed inset-0 bg-black/60 z-[88]" onClick={() => setShowCancelConfirm(false)} />
+                      <div className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-[90] px-6 py-4 rounded-xl shadow-lg font-normal text-gray-800 bg-white border border-yellow-300" role="dialog" aria-modal="true">
+                        <div className="mb-2 text-lg font-normal text-yellow-800 text-center">¿Cancelar creación de la cotización?</div>
+                        <div className="mb-3 text-sm text-gray-600 text-center">Al descartar este borrador se cerrará el proceso actual. Los clientes y productos que hayas creado permanecerán guardados en el sistema y podrán reutilizarse más adelante.</div>
+                        <div className="flex gap-3 justify-center mt-6">
+                          <button className="px-4 py-2 bg-gray-100 rounded border" onClick={() => setShowCancelConfirm(false)}>Seguir editando</button>
+                          <button className="px-4 py-2 bg-red-600 text-white rounded" onClick={() => { setShowCancelConfirm(false); handleCancelCreateModal(); }}>Descartar y cerrar</button>
+                        </div>
+                      </div>
+                    </>
+                  )}
                 </div>
 
-                {showCancelConfirm && (
-                  <>
-                    <div className="fixed inset-0 bg-black/40 z-[88]" onClick={() => setShowCancelConfirm(false)} />
-                    <div className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-[90] px-6 py-4 rounded-xl shadow-lg font-normal text-gray-800 bg-white border border-yellow-300" role="dialog" aria-modal="true">
-                      <div className="mb-2 text-lg font-normal text-yellow-800 text-center">¿Cancelar creación de la cotización?</div>
-                      <div className="mb-3 text-sm text-gray-600 text-center">Al descartar este borrador se cerrará el proceso actual. Los clientes y productos que hayas creado permanecerán guardados en el sistema y podrán reutilizarse más adelante.</div>
-                      <div className="flex gap-3 justify-center mt-6">
-                        <button className="px-4 py-2 bg-gray-100 rounded border" onClick={() => setShowCancelConfirm(false)}>Seguir editando</button>
-                        <button className="px-4 py-2 bg-red-600 text-white rounded" onClick={() => { setShowCancelConfirm(false); handleCancelCreateModal(); }}>Descartar y cerrar</button>
-                      </div>
-                    </div>
-                  </>
-                )}
-                {createSection === 'items' && (
-                  <>
+                {/* Right: Siguiente / Guardar / Enviar */}
+                <div className="flex items-center justify-end flex-1">
+                  {createSection === 'client' && (
                     <button
-                      className="px-4 py-2 bg-yellow-500 text-white rounded hover:bg-yellow-600"
-                      onClick={handleSaveDraft}
-                      disabled={savingDraft}
-                    >
-                      {savingDraft ? 'Guardando...' : 'Guardar borrador'}
-                    </button>
-                    <button
-                      className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700"
-                      disabled={savingDraft || sending}
+                      className="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700"
                       onClick={async () => {
-                        setSending(true);
-                        try {
-                          const payload = {
-                            contact: createForm.contact,
-                            items: createForm.items,
-                            createdAt: new Date().toISOString(),
-                            sendEmail: true
-                          };
-                          const res = await fetch('/api/send-quote-response', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify(payload)
-                          });
-                          if (!res.ok) {
-                            setToast({ type: 'error', message: 'Error al enviar la cotización por correo.' });
-                          } else {
-                            setToast({ type: 'success', message: 'La cotización fue enviada correctamente por correo.' });
-                            // Espera 2 segundos para que el usuario vea la alerta y luego cierra el modal
-                            setTimeout(() => {
-                              setShowCreateModal(false);
-                            }, 2000);
-                          }
-                        } catch {
-                          setToast({ type: 'error', message: 'Error inesperado al enviar.' });
-                        } finally {
-                          setSending(false);
-                        }
+                        if (selectedClientId) { setCreateSection('products'); return; }
+                        if (!clientIsValid) { validateClientFields(); return; }
+                        const ok = await handleCreateClient();
+                        if (!ok) return;
+                        return;
                       }}
+                      disabled={!createForm.contact.company || creatingClient}
                     >
-                      {sending ? 'Enviando...' : 'Enviar cotización'}
+                      Siguiente
                     </button>
-                  </>
-                )}
+                  )}
+                  {createSection === 'products' && (
+                    <button
+                      className="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700"
+                      onClick={() => setCreateSection('items')}
+                    >
+                      Siguiente
+                    </button>
+                  )}
+                  {createSection === 'items' && (
+                    <div className="flex gap-4">
+                      <button
+                        className="px-4 py-2 bg-yellow-500 text-white rounded hover:bg-yellow-600"
+                        onClick={handleSaveDraft}
+                        disabled={savingDraft}
+                      >
+                        {savingDraft ? 'Guardando...' : 'Guardar borrador'}
+                      </button>
+                      {/* Envío deshabilitado en sector Preview por seguridad: botón eliminado */}
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
           </div>
         </div>
       )}
+
+      {/* Global Date Range Modal for Edit/Create */}
+      {showDateModal && (
+        <div className="fixed inset-0 bg-black/30 z-[100] flex items-center justify-center" onClick={() => { (window as any).__dateStart = ''; (window as any).__dateEnd = ''; setDateStart(''); setDateEnd(''); setShowDateModal(false); }}>
+          <div className="bg-white rounded-lg shadow-2xl p-6 w-96 max-w-[95vw]" onClick={e => e.stopPropagation()}>
+            <h3 className="text-lg font-bold text-gray-800 mb-4 pb-2 border-b border-gray-300">Seleccionar Rango de Fechas</h3>
+
+            <div className="space-y-4">
+              <div>
+                <label className="font-semibold block text-sm text-gray-700 mb-2">Fecha Inicio</label>
+                <input
+                  type="date"
+                  className="w-full border border-gray-300 px-3 py-2 rounded text-sm focus:outline-none focus:border-red-500 focus:ring-1 focus:ring-red-200"
+                  value={(window as any).__dateStart || dateStart || ''}
+                  onChange={e => { (window as any).__dateStart = e.target.value; setDateStart(e.target.value); }}
+                />
+              </div>
+
+              <div>
+                <label className="font-semibold block text-sm text-gray-700 mb-2">Fecha Final</label>
+                <input
+                  type="date"
+                  className="w-full border border-gray-300 px-3 py-2 rounded text-sm focus:outline-none focus:border-red-500 focus:ring-1 focus:ring-red-200"
+                  value={(window as any).__dateEnd || dateEnd || ''}
+                  onChange={e => { (window as any).__dateEnd = e.target.value; setDateEnd(e.target.value); }}
+                />
+              </div>
+
+              {(((window as any).__dateStart || dateStart) && ((window as any).__dateEnd || dateEnd)) && (() => {
+                const s = new Date((window as any).__dateStart || dateStart);
+                const e = new Date((window as any).__dateEnd || dateEnd);
+                if (e >= s) {
+                  const diffMs = e.getTime() - s.getTime();
+                  const days = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+                  const weeks = Math.floor(days / 7);
+                  const months = Math.floor(days / 30);
+                  return (
+                    <div className="bg-blue-50 p-3 rounded border border-blue-200 mt-4">
+                      <p className="text-sm font-semibold text-gray-800 mb-2">Duración:</p>
+                      <div className="grid grid-cols-3 gap-3 text-center">
+                        <div className="bg-white p-2 rounded border border-blue-100">
+                          <p className="text-lg font-bold text-blue-600">{days}</p>
+                          <p className="text-xs text-gray-600">Días</p>
+                        </div>
+                        <div className="bg-white p-2 rounded border border-blue-100">
+                          <p className="text-lg font-bold text-blue-600">{weeks}</p>
+                          <p className="text-xs text-gray-600">Semanas</p>
+                        </div>
+                        <div className="bg-white p-2 rounded border border-blue-100">
+                          <p className="text-lg font-bold text-blue-600">{months}</p>
+                          <p className="text-xs text-gray-600">Meses</p>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                }
+                return <p className="text-sm text-red-600 mt-2">La fecha final debe ser posterior a la inicial</p>;
+              })()}
+
+              <div className="flex gap-3 justify-end mt-5 pt-4 border-t border-gray-200">
+                <button
+                  className="px-4 py-2 bg-gray-300 text-gray-700 rounded hover:bg-gray-400 font-medium text-sm transition-colors"
+                  onClick={() => { (window as any).__dateStart = ''; (window as any).__dateEnd = ''; setDateStart(''); setDateEnd(''); setShowDateModal(false); }}
+                >
+                  Cancelar
+                </button>
+                <button
+                  className="px-6 py-2 bg-red-600 text-white rounded hover:bg-red-700 font-medium text-sm transition-colors"
+                  onClick={() => {
+                    const start = (window as any).__dateStart || dateStart;
+                    const end = (window as any).__dateEnd || dateEnd;
+                    if (start && end) {
+                      if (editedQuote) {
+                        setEditedQuote(prev => prev ? ({ ...prev, execution_time: `${start}|${end}` }) : prev);
+                      }
+                      if (showCreateModal) {
+                        setCreateForm((p:any) => ({ ...p, execution_time: `${start}|${end}` }));
+                      }
+                      setShowDateModal(false);
+                    }
+                  }}
+                >
+                  Confirmar
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Remove DashboardHeader, now rendered in layout */}
       {/* <DashboardHeader title="Cotizaciones" /> */}
       {loading ? (
         <div>Cargando...</div>
       ) : (
-        <div className="px-2 sm:px-4 py-4 space-y-8 mt-1 lg:mt-2 overflow-x-hidden">
+        <div className="px-2 sm:px-4 py-4 space-y-2 mt-0 lg:mt-1 overflow-x-hidden">
           {quotes.map((q) => (
-            <div key={q.id} className="bg-white border border-gray-200 rounded-lg shadow p-4 relative">
-              {/* Badge posicionado absolutamente en el centro superior del contenedor */}
-              {(() => {
-                const s = (q.status ?? '').toString().toUpperCase();
-                let cls = 'bg-gray-400 text-white';
-                let label = q.status ?? '';
-                if (s === 'PENDING' || s === 'PENDIENTE') { cls = 'bg-yellow-400 text-yellow-700'; label = 'PENDIENTE'; }
-                else if (s === 'SENT' || s === 'ENVIADO') { cls = 'bg-orange-500 text-orange-300'; label = 'ENVIADO'; }
-                else if (s === 'APPROVED' || s === 'ACEPTADO') { cls = 'bg-green-600 text-green-300'; label = 'ACEPTADO'; }
-                else if (s === 'REJECTED' || s === 'RECHAZADO') { cls = 'bg-red-600 text-red-300'; label = 'RECHAZADO'; }
-                return (
-                  <div className="absolute left-1/2 -translate-x-1/2 top-3">
-                    <button className={`px-6 py-2 rounded-full text-sm font-normal mt-3 ${cls}`} aria-hidden>
-                      {label}
-                    </button>
-                  </div>
-                );
-              })()}
-              <div className="flex flex-col md:flex-row md:items-center md:justify-between mb-2 gap-2">
-                <div className="flex items-center gap-4">
-                  <div>
-                    <div className="font-bold text-lg text-red-700">{q.name}</div>
-                    <div className="text-sm text-gray-600">{q.email} | {q.phone}</div>
-                  </div>
-                  {/* badge moved to absolute position to avoid changing layout */}
+            <div key={q.id} className="bg-white border-2 border-gray-300 rounded-lg shadow-md overflow-hidden p-2">
+              {/* Header con cliente y estado */}
+              <div className="bg-gradient-to-r from-gray-50 to-gray-100 border-b border-gray-300 p-4 flex justify-between items-start relative">
+                <div className="flex-1">
+                  <div className="font-bold text-lg text-red-700">{q.name}</div>
+                  <div className="text-sm text-gray-600 mt-1">{q.email} | {q.phone}</div>
                 </div>
                 <div className="flex items-center gap-3">
-                  <div className="text-xs text-gray-500">{q.createdAt ? new Date(q.createdAt).toLocaleString() : '-'}</div>
+                  {(() => {
+                    const s = (q.status ?? '').toString().toUpperCase();
+                    let cls = 'bg-gray-400 text-white';
+                    let label = q.status ?? '';
+                    if (s === 'PENDING' || s === 'PENDIENTE') { cls = 'bg-yellow-400 text-yellow-700'; label = 'PENDIENTE'; }
+                    else if (s === 'SENT' || s === 'ENVIADO') { cls = 'bg-orange-500 text-white'; label = 'ENVIADO'; }
+                    else if (s === 'APPROVED' || s === 'ACEPTADO') { cls = 'bg-green-600 text-white'; label = 'ACEPTADO'; }
+                    else if (s === 'REJECTED' || s === 'RECHAZADO') { cls = 'bg-red-600 text-white'; label = 'RECHAZADO'; }
+                    return (
+                      <button className={`px-4 py-2 rounded-full text-sm font-semibold ${cls}`} aria-hidden>
+                        {label}
+                      </button>
+                    );
+                  })()}
                   <button
                     onClick={() => toggleCollapse(q.id)}
-                    className="text-blue-500 hover:text-blue-700 text-sm flex items-center justify-center w-10 h-10 rounded-md"
+                    className="text-blue-600 hover:text-blue-800 text-sm flex items-center justify-center w-10 h-10 rounded-md hover:bg-gray-200"
                     aria-label={collapsedQuotes[q.id] ? 'Expandir cotización' : 'Colapsar cotización'}
                     title={collapsedQuotes[q.id] ? 'Expandir' : 'Colapsar'}
                   >
                     {collapsedQuotes[q.id] ? (
-                      <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="lucide lucide-chevron-down">
+                      <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                         <polyline points="6 9 12 15 18 9"></polyline>
                       </svg>
                     ) : (
-                      <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="lucide lucide-chevron-up">
+                      <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                         <polyline points="18 15 12 9 6 15"></polyline>
                       </svg>
                     )}
                   </button>
                 </div>
-                {/* Floating action button: Nueva Cotización (restaurado) */}
-                <button
-                  onClick={openCreateModal}
-                  aria-label="Nueva Cotización"
-                  title="Nueva Cotización (N)"
-                  className="fixed bottom-6 right-6 z-50 bg-red-600 hover:bg-red-700 text-white rounded-full w-14 h-14 flex items-center justify-center shadow-lg"
-                >
-                  <svg xmlns="http://www.w3.org/2000/svg" className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
-                  </svg>
-                </button>
               </div>
-                  {!collapsedQuotes[q.id] && (
-                    <>
-                      <div className="flex flex-wrap gap-4 mb-2">
-                <div><span className="font-semibold">Área:</span> {q.area ?? '-'}</div>
-                <div><span className="font-semibold">Material:</span> {q.materialType ?? '-'}</div>
-                <div><span className="font-semibold">Precio estimado:</span> {q.estimatedPrice ? `$${q.estimatedPrice.toLocaleString()}` : '-'}</div>
-                <div><span className="font-semibold">Estado:</span> {q.status ?? '-'}</div>
-              </div>
-              <div className="flex flex-wrap gap-4 mb-2 text-xs text-gray-700">
-                <div><span className="font-semibold">Compañía:</span> {q.items?.[0]?.company ?? '-'}</div>
-                <div><span className="font-semibold">Email:</span> {q.items?.[0]?.email ?? '-'}</div>
-                <div><span className="font-semibold">Teléfono:</span> {q.items?.[0]?.phone ?? '-'}</div>
-                <div><span className="font-semibold">Documento:</span> {q.items?.[0]?.document ?? '-'}</div>
-                <div><span className="font-semibold">Creado:</span> {q.items?.[0]?.created_at ? new Date(q.items[0].created_at!).toLocaleString() : (q.createdAt ? new Date(q.createdAt).toLocaleString() : '-')}</div>
-                <div><span className="font-semibold">quote_id:</span> {q.items?.[0]?.quote_id ?? '-'}</div>
-                <div><span className="font-semibold">Descuento:</span> {q.items?.[0]?.discount ? `${q.items[0].discount}%` : '-'}</div>
-              </div>
-              {/* Acciones para la solicitud de cotización alineadas a la derecha */}
-              <div className="flex gap-3 mt-4 mb-2 justify-end">
-                <button className="px-3 py-2 bg-blue-700 text-white rounded hover:bg-blue-800 transition" onClick={() => {
-                  setSelectedQuote(q);
-                  setEditedPrices({});
-                  setShowModal(true);
-                  setOriginalOrder(q.items ? q.items.map(item => item.id) : []);
-                }}>Precios</button>
-                <button
-                  disabled={sending}
-                  className={`px-3 py-2 ${sending ? 'bg-red-700 cursor-not-allowed' : 'bg-red-600 hover:bg-red-700'} text-white rounded transition`}
-                  onClick={async () => {
-                    setSending(true);
-                    try {
-                      // Preparar datos para la API
-                      const firstItem = (q.items && q.items[0]) as Record<string, unknown>;
-                      const contact = {
-                        company: String(firstItem?.company ?? '').toUpperCase(),
-                        email: firstItem?.email ?? '',
-                        phone: firstItem?.phone ?? '',
-                        document: firstItem?.document ?? '',
-                        company_address: firstItem?.company_address ?? firstItem?.company ?? 'N/A',
-                        contact_name: q.name ?? '',
+
+              {!collapsedQuotes[q.id] && (
+                <>
+                  {/* Grid consolidado de información */}
+                  <div className="grid grid-cols-5 gap-1 p-1">
+                    <div className="p-1 border border-gray-300 rounded bg-red-700">
+                      <div className="text-xs font-semibold text-white/50 uppercase">Cotización</div>
+                      <div className="text-base text-white text-center font-bold -mt-2">{q.correlative ?? '-'}</div>
+                    </div>
+                    <div className="p-1 border border-gray-300 rounded bg-white">
+                      <div className="text-xs font-semibold text-gray-400 uppercase">Estado</div>
+                      <div className="text-xs text-gray-900 text-center">{q.status ?? '-'}</div>
+                    </div>
+                    <div className="p-1 border border-gray-300 rounded bg-white">
+                      <div className="text-xs font-semibold text-gray-400 uppercase">Creado</div>
+                      <div className="text-xs text-gray-900 text-center">{q.createdAt ? new Date(q.createdAt).toLocaleDateString() : '-'}</div>
+                    </div>
+                    <div className="p-1 border border-gray-300 rounded bg-white">
+                      <div className="text-xs font-semibold text-gray-400 uppercase">Compañía</div>
+                      <div className="text-xs text-gray-900 text-center">{q.items?.[0]?.company ?? '-'}</div>
+                    </div>
+                    <div className="p-1 border border-gray-300 rounded bg-white">
+                      <div className="text-xs font-semibold text-gray-400 uppercase">Documento</div>
+                      <div className="text-xs text-gray-900 text-center">{q.items?.[0]?.document ?? '-'}</div>
+                    </div>
+                    <div className="p-1 border border-gray-300 rounded bg-white">
+                      <div className="text-xs font-semibold text-gray-400 uppercase">Email</div>
+                      <div className="text-xs text-gray-900 text-center truncate">{q.items?.[0]?.email ?? '-'}</div>
+                    </div>
+                    <div className="p-1 border border-gray-300 rounded bg-white">
+                      <div className="text-xs font-semibold text-gray-400 uppercase">Teléfono</div>
+                      <div className="text-xs text-gray-900 text-center">{q.items?.[0]?.phone ?? '-'}</div>
+                    </div>
+                    <div className="p-1 border border-gray-300 rounded bg-white">
+                      <div className="text-xs font-semibold text-gray-400 uppercase">Descuento</div>
+                      <div className="text-xs text-gray-900 text-center">{q.items?.[0]?.discount ? `${q.items[0].discount}%` : '-'}</div>
+                    </div>
+                    <div className="p-1 border border-gray-300 rounded bg-white">
+                      <div className="text-xs font-semibold text-gray-400 uppercase">Ejecución</div>
+                      <div className="text-xs text-gray-900 text-center">{q.execution_time ?? '-'}</div>
+                    </div>
+                    <div className="p-1 border border-gray-300 rounded bg-white">
+                      <div className="text-xs font-semibold text-gray-400 uppercase">Forma Pago</div>
+                      <div className="text-xs text-gray-900 text-center">{q.payment_method ?? '-'}</div>
+                    </div>
+                    <div className="p-1 border border-gray-300 rounded bg-white">
+                      <div className="text-xs font-semibold text-gray-400 uppercase">Quote ID</div>
+                      <div className="text-xs text-gray-700 font-mono truncate text-center">{q.items?.[0]?.quote_id ? q.items[0].quote_id.substring(0, 20) + '...' : '-'}</div>
+                    </div>
+                  </div>
+
+                  {/* Descripción */}
+                  <div className="p-1 bg-gray-50 w-full">
+                    <div className="text-xs font-semibold text-gray-700 uppercase mb-1">Descripción</div>
+                    <div className="text-xs text-gray-800 whitespace-pre-wrap p-2 bg-white border border-gray-200 rounded max-h-[60vh] overflow-auto w-full">
+                      {q.description || '(vacío)'}
+                    </div>
+                  </div>
+
+                  {/* Botones de acción */}
+                  <div className="bg-gray-50 p-1 flex gap-1 justify-end border-t border-gray-300">
+                    <button className="px-4 py-2 bg-blue-900 text-white rounded hover:bg-blue-800 transition font-semibold text-sm" onClick={() => {
+                      setSelectedQuote(q);
+                      // Crear copia mutable de la cotización
+                      const quoteForEditing: Quote = {
+                        ...q,
+                        name: q.name || '',
+                        email: q.email || '',
+                        phone: q.phone || '',
+                        execution_time: q.execution_time || '',
+                        payment_method: q.payment_method || '',
+                        description: q.description || '',
+                        items: q.items ? q.items.map(item => ({ ...item })) : []
                       };
-                      const items = (q.items ?? []).map(item => {
-                        const basePrice = typeof item.update_price === 'number' ? item.update_price : item.price;
-                        const subtotal = basePrice ? Math.round(basePrice * 1.19) : 0;
-                        // Extraer SKU y características del producto relacionado si existe
-                        const product = (item as Record<string, unknown>).product as Record<string, unknown>;
-                        const sku = (item as Record<string, unknown>).sku || product?.sku || '';
-                        const characteristics = (item as Record<string, unknown>).characteristics || product?.characteristics || [];
-                        return {
-                          ...item,
-                          price: basePrice,
-                          subtotal,
-                          sku,
-                          characteristics,
-                        };
+                      setEditedQuote(quoteForEditing);
+                      // inicializar precios, cantidades y descuentos editables
+                      const prices: Record<string, number> = {};
+                      const qtys: Record<string, number> = {};
+                      const discounts: Record<string, number> = {};
+                      (q.items || []).forEach(it => {
+                        prices[it.id] = it.update_price ?? it.price ?? 0;
+                        qtys[it.id] = it.qty ?? 1;
+                        discounts[it.id] = it.discount ?? 0;
                       });
-                      const total = items.reduce((acc, item) => acc + (item.subtotal ?? 0), 0);
-
-                      // Primero guardar/actualizar la cotización en el backend
-                      const saveResp = await fetch('/api/quotes', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                          contact,
-                          items,
-                          parent_quote_id: q.id,
-                        }),
-                      });
-
-                      if (!saveResp.ok) {
-                        alert('Error guardando la cotización antes de enviar');
-                        return;
-                      }
-
-                      // saveJson eliminado: variable no utilizada
-
-                      // Luego generar PDF de respuesta (cotización con precios) y enviar
-                      const response = await fetch('/api/send-quote-response', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                          quote_id: q.id,
-                          contact,
-                          items,
-                          createdAt: q.createdAt ?? new Date().toISOString(),
-                          total,
-                          sendEmail: true,
-                        }),
-                      });
-
-                      if (!response.ok) {
-                        alert('Error generating PDF or sending email');
-                        setSending(false);
-                        return;
-                      }
-
-                      const emailSent = response.headers.get('x-email-sent') === 'true';
-                      if (emailSent) {
-                        alert('Cotización generada y enviada por email correctamente.');
-                      } else {
-                        alert('Cotización guardada, pero el correo no se pudo enviar. Revisa los logs en el servidor.');
-                      }
-                      setSending(false);
-                    } catch (err) {
-                      console.error(err);
-                      alert('Error al generar o enviar la cotización.');
-                    } finally {
-                      setSending(false);
-                    }
+                      setEditedPrices(prices);
+                      setEditedQtys(qtys);
+                      setEditedDiscounts(discounts);
+                      setShowModal(true);
+                      setOriginalOrder(q.items ? q.items.map(item => item.id) : []);
+                    }}>Editar cotización</button>
+                    <button
+                      disabled={sending}
+                      className={`px-4 py-2 ${sending ? 'bg-red-800 cursor-not-allowed' : 'bg-red-700 hover:bg-red-800'} text-white rounded transition font-semibold text-sm`}
+                      onClick={async () => {
+                        try {
+                          const res = await fetch('/api/quotes');
+                          if (res.ok) {
+                            const all = await res.json();
+                            const latest = all.find((x: Quote) => x.id === q.id) ?? q;
+                            setQuoteToSend(latest);
+                          } else {
+                            setQuoteToSend(q);
+                          }
+                        } catch {
+                          setQuoteToSend(q);
+                        }
+                    setShowQuoteSendConfirm(true);
                   }}
                 >
                   {sending ? 'Enviando...' : 'Enviar Cotización'}
                 </button>
-                <button className="px-3 py-2 bg-gray-500 text-white rounded hover:bg-gray-600 transition">Ver historial</button>
+                <button className="px-3 py-2 bg-gray-500 text-white rounded hover:bg-gray-600 transition" onClick={() => { console.log('[Versions] Historial clicked', q.id); openVersionsModal(q.id); }}>Historial</button>
+                <button
+                  className={`px-3 py-2 ${previewingPdfId === q.id ? 'bg-indigo-700 cursor-not-allowed' : 'bg-indigo-600 hover:bg-indigo-700'} text-white rounded transition`}
+                  onClick={async () => {
+                    setPreviewingPdfId(q.id);
+                    await previewQuotePdf(q);
+                    setPreviewingPdfId(null);
+                  }}
+                  disabled={previewingPdfId === q.id}
+                >
+                  {previewingPdfId === q.id ? 'Generando...' : 'Previsualizar PDF'}
+                </button>
               </div>
               {/* Mobile: items as cards */}
-              <div className="md:hidden space-y-2">
+              <div className="md:hidden space-y-1">
                 {q.items && q.items.length > 0 ? (
                   q.items.map((item) => (
-                    <div key={item.id} className="border rounded p-3">
-                      <div className="flex items-start gap-3">
+                        <div key={item.id} className="border rounded p-2">
+                          <div className="flex items-start gap-2">
                         <div className="flex-1 min-w-0">
                           <div className="font-semibold text-gray-900 truncate">{item.name}</div>
-                          <div className="text-xs text-gray-600">Qty: {item.qty} · {item.unit_size || '-'} {item.measurement_unit || ''}</div>
-                          <div className="text-xs text-gray-600">Precio: {item.price ? `$${item.price.toLocaleString()}` : '-'}</div>
+                          <div className="text-xs text-gray-600">Qty: {item.qty} · {(item.measurement_unit || '').replace(/^unidad\s+/i, '')}</div>
+                          <div className="text-xs text-gray-600">Precio: {item.price ? `$${formatCLP(item.price)}` : '-'}</div>
                           <div className="text-xs text-gray-600 truncate">ID: {item.id.split('-')[0]}</div>
                         </div>
                         {item.image_url ? (
@@ -1943,18 +2705,18 @@ export default function QuotesPage() {
                 <table className="min-w-full bg-white border border-gray-200 text-xs table-fixed">
                   <thead>
                     <tr>
-                      <th className="px-2 py-1 border-b w-[10%]">product_id</th>
-                      <th className="px-2 py-1 border-b w-[18%]">Producto</th>
-                      <th className="px-2 py-1 border-b w-[10%]">Imagen</th>
-                      <th className="px-2 py-1 border-b w-[8%]">Cantidad</th>
-                      <th className="px-2 py-1 border-b w-[14%] text-center">Unidad</th>
-                      <th className="px-2 py-1 border-b w-[14%]">Características</th>
-                      <th className="px-2 py-1 border-b w-[12%]">Descripción</th>
+                      <th className="px-1 py-0.5 border-b w-[10%]">product_id</th>
+                      <th className="px-1 py-0.5 border-b w-[20%]">Producto</th>
+                      <th className="px-1 py-0.5 border-b w-[10%]">Imagen</th>
+                      <th className="px-1 py-0.5 border-b w-[8%]">Cantidad</th>
+                      <th className="px-1 py-0.5 border-b w-[14%] text-center">Unidad</th>
+                      <th className="px-1 py-0.5 border-b w-[14%]">Características</th>
+                      <th className="px-1 py-0.5 border-b w-[20%]">Descripción</th>
                       {/* <th className="px-2 py-1 border-b w-[10%]">Fabricante</th> */}
-                      <th className="px-2 py-1 border-b w-[12%] text-center">Valor unitario</th>
-                      <th className="px-2 py-1 border-b w-[12%] text-center">Precio</th>
-                      <th className="px-2 py-1 border-b w-[10%]">Descuento (%)</th>
-                      <th className="px-2 py-1 border-b w-[12%] text-center">Subtotal</th>
+                      <th className="px-1 py-0.5 border-b w-[12%] text-center">Valor unitario</th>
+                      <th className="px-1 py-0.5 border-b w-[12%] text-center">Precio</th>
+                      <th className="px-1 py-0.5 border-b w-[10%]">Descuento (%)</th>
+                      <th className="px-1 py-0.5 border-b w-[12%] text-center">Subtotal</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -1990,15 +2752,17 @@ export default function QuotesPage() {
                         const subtotal = priceTotal !== null ? (priceTotal - discountAmount) : 0;
                         return (
                           <tr key={item.id} className="border-b">
-                              <td className="px-2 py-1 truncate">
+                              <td className="px-1 py-0.5 truncate">
                                 <span title={product.id?.toString()}>
                                   {product.id !== undefined && product.id !== null
                                     ? product.id.toString().split('-')[0]
                                     : ''}
                                 </span>
                               </td>
-                              <td className="px-2 py-1 truncate">{product.name ?? item.name}</td>
-                              <td className="px-2 py-1">
+                              <td className="px-1 py-0.5" style={{ maxWidth: '640px' }}>
+                                <div style={{ whiteSpace: 'normal', wordBreak: 'break-word', overflowWrap: 'break-word' }}>{product.name ?? item.name}</div>
+                              </td>
+                              <td className="px-1 py-0.5">
                               {product.image_url ? (
                                 <div className="relative w-10 h-10">
                                   <Image src={Array.isArray(product.image_url) ? product.image_url[0] as string : (product.image_url as string)} alt={product.name || ''} fill className="object-contain rounded border" sizes="40px" />
@@ -2007,9 +2771,9 @@ export default function QuotesPage() {
                                 <span className="text-gray-400">-</span>
                               )}
                             </td>
-                              <td className="px-2 py-1 text-center">{item.qty}</td>
-                              <td className="px-2 py-1 text-center">{product.unit_size ?? item.unit_size ?? '-'} {product.measurement_unit ?? item.measurement_unit ?? ''}</td>
-                              <td className="px-2 py-1 truncate">
+                              <td className="px-1 py-0.5 text-center">{item.qty}</td>
+                              <td className="px-1 py-0.5 text-center">{(product.measurement_unit ?? item.measurement_unit ?? '').replace(/^unidad\s+/i, '')}</td>
+                              <td className="px-1 py-0.5 truncate">
                               {characteristics.length > 0 ? (
                                   <div className="flex flex-wrap gap-1 overflow-hidden">
                                   {characteristics.map((c, idx) => (
@@ -2022,12 +2786,16 @@ export default function QuotesPage() {
                                 <span className="text-gray-400">-</span>
                               )}
                             </td>
-                              <td className="px-2 py-1 truncate" title={product.description ?? ''}>{product.description ?? '-'}</td>
+                              <td className="px-2 py-1" style={{ maxWidth: '180px' }}>
+                                <div style={{ whiteSpace: 'normal', wordBreak: 'break-word', overflowWrap: 'break-word' }} title={product.description ?? ''}>
+                                  {product.description ?? '-'}
+                                </div>
+                              </td>
                               {/* <td className="px-2 py-1 truncate">{product.manufacturer ?? '-'}</td> */}
-                              <td className="px-2 py-1 text-center">{typeof perUnit === 'number' ? `$${perUnit.toLocaleString('es-CL')}` : '-'}</td>
-                              <td className="px-2 py-1 text-center">{priceTotal !== null ? `$${priceTotal.toLocaleString('es-CL')}` : '-'}</td>
-                              <td className="px-2 py-1 text-center">{item.discount ? `${item.discount}%` : '-'}</td>
-                              <td className="px-2 py-1 text-center">{subtotal ? `$${subtotal.toLocaleString('es-CL')}` : '-'}</td>
+                              <td className="px-1 py-0.5 text-center">{typeof perUnit === 'number' ? `$${formatCLP(perUnit)}` : '-'}</td>
+                              <td className="px-1 py-0.5 text-center">{priceTotal !== null ? `$${formatCLP(priceTotal)}` : '-'}</td>
+                              <td className="px-1 py-0.5 text-center">{item.discount ? `${item.discount}%` : '-'}</td>
+                              <td className="px-1 py-0.5 text-center">{subtotal ? `$${formatCLP(subtotal)}` : '-'}</td>
                           </tr>
                         );
                       })
@@ -2042,6 +2810,146 @@ export default function QuotesPage() {
             </div>
           ))}
         </div>
+      )}
+      {/* Versions Modal - rendered at top level */}
+      {versionsModalOpen && (
+        <>
+          <div className="fixed inset-0 bg-black/60 z-[120]" onClick={() => { setVersionsModalOpen(false); setSelectedVersionPayload(null); setSelectedVersionMeta(null); }} />
+          <div className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-[121] w-[95%] max-w-7xl h-[85vh] bg-white rounded-xl shadow-2xl flex flex-col">
+            <div className="flex justify-between items-center p-6 border-b">
+              <h2 className="text-2xl font-bold">Historial de Versiones</h2>
+              <div className="flex gap-2">
+                <button className="px-4 py-2 bg-gray-200 hover:bg-gray-300 rounded" onClick={() => { setSelectedVersionPayload(null); setSelectedVersionMeta(null); }}>Limpiar</button>
+                <button className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded" onClick={() => { setVersionsModalOpen(false); setSelectedVersionPayload(null); setSelectedVersionMeta(null); }}>Cerrar</button>
+              </div>
+            </div>
+            <div className="flex flex-1 overflow-hidden">
+              {/* Versions List */}
+              <div className="w-64 border-r bg-gray-50 overflow-auto p-4">
+                <div className="text-sm font-semibold text-gray-700 mb-3">Versiones disponibles</div>
+                {versionsLoading ? (
+                  <div className="text-sm text-gray-600">Cargando...</div>
+                ) : versionsList.length === 0 ? (
+                  <div className="text-sm text-gray-500">Sin versiones</div>
+                ) : (
+                  <ul className="space-y-2">
+                    {versionsList.map((v: any) => (
+                      <li key={v.id} className="border rounded p-3 bg-white hover:bg-blue-50 cursor-pointer transition">
+                        <div className="font-semibold text-sm">v{v.version}</div>
+                        <div className="text-xs text-gray-600 mt-1">{v.correlativo ? `Correlativo: ${v.correlativo}` : '-'}</div>
+                        <div className="text-xs text-gray-500 mt-1">{v.created_at ? new Date(v.created_at).toLocaleDateString() : '-'}</div>
+                        <div className="flex gap-1 mt-2">
+                          <button className="flex-1 px-2 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded text-xs" onClick={() => fetchAndShowVersion(selectedQuoteForVersions || v.quote_id, v.version)}>Ver</button>
+                          <button className="flex-1 px-2 py-1 bg-gray-300 hover:bg-gray-400 text-gray-800 rounded text-xs" onClick={async () => {
+                            const res = await fetch(`/api/quotes/${encodeURIComponent(selectedQuoteForVersions || v.quote_id)}/versions/${v.version}`);
+                            const data = await res.json();
+                            const blob = new Blob([JSON.stringify(data.payload ?? {}, null, 2)], { type: 'application/json' });
+                            const url = URL.createObjectURL(blob);
+                            const a = document.createElement('a');
+                            a.href = url;
+                            a.download = `quote_${v.quote_id}_v${v.version}.json`;
+                            a.click();
+                            URL.revokeObjectURL(url);
+                          }}>JSON</button>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+              {/* Content Area */}
+              <div className="flex-1 overflow-auto p-6">
+                {selectedVersionPayload ? (
+                  <div>
+                    {/* Graphic view of the quote */}
+                    <div className="mb-6">
+                      <h3 className="text-xl font-bold mb-4">Cotización {selectedVersionPayload.pdf_correlative || selectedVersionPayload.quote?.correlativo || '-'}</h3>
+                      
+                      {/* Quote info */}
+                      <div className="grid grid-cols-2 gap-4 mb-6 p-4 bg-gray-50 rounded">
+                        <div><span className="font-semibold">Cliente:</span> {selectedVersionPayload.quote?.name ?? selectedVersionPayload.quote?.contact_name ?? '-'}</div>
+                        <div><span className="font-semibold">Documento:</span> {selectedVersionPayload.quote?.document ?? '-'}</div>
+                        <div><span className="font-semibold">Email:</span> {selectedVersionPayload.quote?.email ?? '-'}</div>
+                        <div><span className="font-semibold">Teléfono:</span> {selectedVersionPayload.quote?.phone ?? '-'}</div>
+                        <div><span className="font-semibold">Dirección:</span> {selectedVersionPayload.quote?.company_address ?? '-'}</div>
+                        <div><span className="font-semibold">Estado:</span> {selectedVersionPayload.quote?.status ?? '-'}</div>
+                        <div><span className="font-semibold">Tipo:</span> {selectedVersionPayload.quote?.material_type ?? '-'}</div>
+                        <div><span className="font-semibold">Correlativo:</span> {selectedVersionPayload.quote?.correlative ?? selectedVersionPayload.pdf_correlative ?? '-'}</div>
+                        <div className="col-span-2"><span className="font-semibold">Generado:</span> {selectedVersionPayload.metadata?.generatedAt ? new Date(selectedVersionPayload.metadata.generatedAt).toLocaleString() : (selectedVersionPayload.generatedAt ? new Date(selectedVersionPayload.generatedAt).toLocaleString() : '-')}</div>
+                      </div>
+
+                      {/* Items table */}
+                      <div className="mb-6">
+                        <h4 className="font-semibold mb-2">Productos/Servicios</h4>
+                        <div className="border rounded overflow-hidden">
+                          <table className="w-full text-sm">
+                            <thead>
+                              <tr className="bg-gray-100 border-b">
+                                <th className="px-3 py-2 text-left">SKU</th>
+                                <th className="px-3 py-2 text-left">Producto</th>
+                                <th className="px-3 py-2 text-center">Cantidad</th>
+                                <th className="px-3 py-2 text-center">Unidad</th>
+                                <th className="px-3 py-2 text-right">Precio Unit.</th>
+                                <th className="px-3 py-2 text-right">Desc.</th>
+                                <th className="px-3 py-2 text-right">Total</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {selectedVersionPayload.items && selectedVersionPayload.items.length > 0 ? (
+                                selectedVersionPayload.items.map((item: any, idx: number) => {
+                                  const basePrice = item.update_price || item.price || 0;
+                                  const qty = item.qty || 0;
+                                  const discount = item.discount || 0;
+                                  const subtotal = basePrice * qty;
+                                  const total = subtotal * (1 - discount / 100);
+                                  return (
+                                    <tr key={idx} className="border-b hover:bg-gray-50">
+                                      <td className="px-3 py-2 text-xs text-gray-600">{item.product_id?.substring(0, 8) || item.id?.substring(0, 8) || '-'}</td>
+                                      <td className="px-3 py-2">{item.name || '-'}</td>
+                                      <td className="px-3 py-2 text-center">{qty}</td>
+                                      <td className="px-3 py-2 text-center text-xs">{item.measurement_unit || ''}</td>
+                                      <td className="px-3 py-2 text-right">${basePrice > 0 ? formatCLP(basePrice) : '0'}</td>
+                                      <td className="px-3 py-2 text-right">{discount > 0 ? `${discount}%` : '-'}</td>
+                                      <td className="px-3 py-2 text-right font-semibold">${total > 0 ? formatCLP(total) : '0'}</td>
+                                    </tr>
+                                  );
+                                })
+                              ) : (
+                                <tr><td colSpan={7} className="px-3 py-2 text-gray-500">Sin items</td></tr>
+                              )}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+
+                      {/* Summary */}
+                      <div className="flex justify-end">
+                        <div className="w-64 space-y-2 p-4 bg-gray-50 rounded">
+                          <div className="flex justify-between">
+                            <span>Subtotal:</span> 
+                            <span>${selectedVersionPayload.quote?.subtotal ? formatCLP(selectedVersionPayload.quote.subtotal) : (selectedVersionPayload.items ? formatCLP(selectedVersionPayload.items.reduce((sum: number, item: any) => sum + ((item.update_price || item.price || 0) * (item.qty || 0) * (1 - (item.discount || 0) / 100)), 0)) : '0')}</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span>Impuesto:</span> 
+                            <span>${selectedVersionPayload.quote?.tax ? formatCLP(selectedVersionPayload.quote.tax) : '0'}</span>
+                          </div>
+                          <div className="flex justify-between font-bold text-lg border-t pt-2">
+                            <span>Total:</span> 
+                            <span>${selectedVersionPayload.quote?.total ? formatCLP(selectedVersionPayload.quote.total) : (selectedVersionPayload.items ? formatCLP(selectedVersionPayload.items.reduce((sum: number, item: any) => sum + ((item.update_price || item.price || 0) * (item.qty || 0) * (1 - (item.discount || 0) / 100)), 0)) : '0')}</span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="text-gray-500 text-center mt-20">
+                    <p className="text-lg">Selecciona una versión para ver la cotización</p>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        </>
       )}
     </div>
   );

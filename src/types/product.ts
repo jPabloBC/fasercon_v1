@@ -21,6 +21,8 @@ export type Product = {
   measurement_type_other?: string;
   measurement_unit_other?: string;
   supplier?: string | { id: string; name: string } | null;
+  // `type` indicates whether the item is a Producto (true) or Suministro (false)
+  type?: boolean;
 }
 
 export type SupplierRef = {

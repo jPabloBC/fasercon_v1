@@ -5,6 +5,7 @@ import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { CalculatorIcon } from '@heroicons/react/24/outline'
+import { formatCLP } from '@/lib/format'
 
 const quoteSchema = z.object({
   name: z.string().min(2, 'El nombre debe tener al menos 2 caracteres'),
@@ -236,8 +237,8 @@ export default function QuoteCalculator() {
               >
                 <option value="">Selecciona un material</option>
                 {Object.entries(materialLabels).map(([value, label]) => (
-                  <option key={value} value={value}>
-                    {label} - ${materialPrices[value as keyof typeof materialPrices].toLocaleString()}/m²
+                <option key={value} value={value}>
+                    {label} - ${formatCLP(materialPrices[value as keyof typeof materialPrices])}/m²
                   </option>
                 ))}
               </select>
@@ -263,21 +264,21 @@ export default function QuoteCalculator() {
               <div className="rounded-md bg-green-50 p-6">
                 <h4 className="text-lg font-semibold text-green-800 mb-4">Estimación del Proyecto</h4>
                 <div className="space-y-2 text-sm text-green-700">
-                  <div className="flex justify-between">
+                    <div className="flex justify-between">
                     <span>Material ({materialLabels[materialType as keyof typeof materialLabels]}):</span>
-                    <span>${((width * length) * materialPrices[materialType as keyof typeof materialPrices]).toLocaleString()}</span>
+                    <span>${formatCLP((width * length) * materialPrices[materialType as keyof typeof materialPrices])}</span>
                   </div>
                   <div className="flex justify-between">
                     <span>Estructura:</span>
-                    <span>${((width * length) * 25000).toLocaleString()}</span>
+                    <span>${formatCLP((width * length) * 25000)}</span>
                   </div>
                   <div className="flex justify-between">
                     <span>Instalación:</span>
-                    <span>${(((width * length) * materialPrices[materialType as keyof typeof materialPrices]) * 0.3).toLocaleString()}</span>
+                    <span>${formatCLP(((width * length) * materialPrices[materialType as keyof typeof materialPrices]) * 0.3)}</span>
                   </div>
-                  <div className="border-t border-green-200 pt-2 flex justify-between font-semibold text-lg">
+                    <div className="border-t border-green-200 pt-2 flex justify-between font-semibold text-lg">
                     <span>Total Estimado:</span>
-                    <span>${estimate.toLocaleString()}</span>
+                    <span>${formatCLP(estimate)}</span>
                   </div>
                 </div>
                 <p className="mt-4 text-xs text-green-600">

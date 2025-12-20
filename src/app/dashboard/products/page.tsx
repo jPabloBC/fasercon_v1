@@ -21,6 +21,8 @@ export default function DashboardProductsPage() {
   const [products, setProducts] = useState<Product[]>([])
   /* loading state removed (unused) */
   const [, setSavingId] = useState<string | null>(null)
+  const [publishingId, setPublishingId] = useState<string | null>(null)
+  const [typeSavingId, setTypeSavingId] = useState<string | null>(null)
   const [, setUploadingId] = useState<string | null>(null)
   const [creating, setCreating] = useState(false)
   const [showCreateForm, setShowCreateForm] = useState(false)
@@ -1031,20 +1033,57 @@ export default function DashboardProductsPage() {
   }
 
   const togglePublish = async (product: Product) => {
-    setSavingId(product.id)
+    setPublishingId(product.id)
+    const newVisibleState = !product.visible
     try {
+      // Actualizar el estado local inmediatamente para evitar flash
+      updateLocal(product.id, { visible: newVisibleState })
+      
       const res = await fetch('/api/products', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: product.id, visible: !product.visible }),
+        body: JSON.stringify({ id: product.id, visible: newVisibleState }),
       })
-      if (!res.ok) throw new Error('Error toggling')
-      await fetchProducts()
+      if (!res.ok) {
+        // Si falla, revertir el cambio local
+        updateLocal(product.id, { visible: product.visible })
+        throw new Error('Error toggling')
+      }
+      // Revalidar páginas públicas en segundo plano
       try { await fetch('/api/revalidate', { method: 'POST' }) } catch (e) { console.error('Revalidate failed', e) }
     } catch (error) {
       console.error('Toggle publish error', error)
+      setAlert({ type: 'error', message: 'Error al cambiar visibilidad del producto' })
     } finally {
-      setSavingId(null)
+      setPublishingId(null)
+    }
+  }
+
+  const toggleType = async (product: Product) => {
+    setTypeSavingId(product.id)
+    // 'type' is not defined on Product; read it via any to avoid TS errors and compute the new state
+    const currentType = (product as any).type ?? false
+    const newTypeState = !currentType
+    try {
+      // Optimistic update (cast the patch to Partial<Product> to satisfy types)
+      updateLocal(product.id, ({ type: newTypeState } as unknown) as Partial<Product>)
+
+      const res = await fetch('/api/products', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: product.id, type: newTypeState }),
+      })
+      if (!res.ok) {
+        // revert optimistic update
+        updateLocal(product.id, ({ type: currentType } as unknown) as Partial<Product>)
+        throw new Error('Error toggling type')
+      }
+      try { await fetch('/api/revalidate', { method: 'POST' }) } catch (e) { console.error('Revalidate failed', e) }
+    } catch (error) {
+      console.error('Toggle type error', error)
+      setAlert({ type: 'error', message: 'Error al cambiar tipo del producto' })
+    } finally {
+      setTypeSavingId(null)
     }
   }
 
@@ -1282,14 +1321,14 @@ export default function DashboardProductsPage() {
         </div>
       )}
 
-      <div className="mt-[64px] min-h-[95vh] flex flex-col">
-        <div className="max-w-6xl mx-auto px-4 w-full flex-1 flex flex-col">
+      <div className="mt-1 min-h-[95vh] flex flex-col">
+        <div className="max-w-6xl mx-auto px-4 w-full flex flex-col">
         </div>
         <main className="flex-1 flex flex-col">
           <div className="mx-auto w-full flex-1 flex flex-col">
             <div className="flex items-center justify-between">
               {/* Botones flotantes fijos debajo del header, a la derecha */}
-              <div className="fixed top-[70px] right-4 z-30 flex flex-col gap-3 items-end">
+                <div className="fixed top-[70px] right-4 z-45 flex flex-col gap-3 items-end">
                 <div className="flex flex-row gap-2 items-center">
                   {selectedIds.length > 0 && (
                     <>
@@ -1313,14 +1352,14 @@ export default function DashboardProductsPage() {
                     onClick={() => setShowCreateForm(prev => !prev)}
                     aria-label={showCreateForm ? 'Cerrar crear producto' : 'Crear producto'}
                     title={showCreateForm ? 'Cerrar crear producto' : 'Crear producto'}
-                    className="p-2 rounded-full bg-red-600 text-white shadow-lg hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-400 transition-all flex items-center justify-center"
+                    className="h-12 w-12 rounded-full bg-red-600 text-white shadow-lg hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-400 transition-all flex items-center justify-center"
                   >
-                    {showCreateForm ? (
-                      <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
+                      {showCreateForm ? (
+                      <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" />
                       </svg>
                     ) : (
-                      <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
+                      <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 4v16M4 12h16" />
                       </svg>
                     )}
@@ -1387,21 +1426,25 @@ export default function DashboardProductsPage() {
               <div className="p-8 text-center">Cargando productos...</div>
             ) : (
               <>
-                {/* Buscador global sobre todos los campos */}
-                <div className="mb-3 flex items-center gap-2 -mt-4">
-                  <input
-                    value={dashboardQuery}
-                    onChange={(e) => setDashboardQuery(e.target.value)}
-                    placeholder="Buscar en todos los campos (nombre, descripción, SKU, características, proveedor, etc.)"
-                    className="w-full max-w-xl border border-gray-300 px-3 py-2 rounded bg-white text-gray-800"
-                    aria-label="Buscar productos en dashboard"
-                  />
-                  {dashboardQuery && (
-                    <button type="button" onClick={() => setDashboardQuery('')} className="px-3 py-2 text-sm bg-gray-100 rounded hover:bg-gray-200">Limpiar</button>
-                  )}
+                {/* Buscador sticky dentro del main para no solaparse con el aside */}
+                <div className="sticky top-[60px] z-40">
+                  <div className="max-w-6xl mx-auto px-4">
+                    <div className="mb-3 flex items-center gap-2">
+                      <input
+                        value={dashboardQuery}
+                        onChange={(e) => setDashboardQuery(e.target.value)}
+                        placeholder="Buscar en todos los campos (nombre, descripción, SKU, características, proveedor, etc.)"
+                        className="w-full max-w-xl border border-gray-300 px-3 py-2 rounded bg-white text-gray-800 shadow"
+                        aria-label="Buscar productos en dashboard"
+                      />
+                      {dashboardQuery && (
+                        <button type="button" onClick={() => setDashboardQuery('')} className="px-3 py-2 text-sm bg-gray-100 rounded hover:bg-gray-200">Limpiar</button>
+                      )}
+                    </div>
+                  </div>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 h-[95vh] content-stretch">
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 items-start">
                 {[...viewProducts]
                   .sort((a, b) => {
                     // Prioridad: updated_at, luego created_at
@@ -1490,9 +1533,34 @@ export default function DashboardProductsPage() {
                     <div className="mt-auto pt-3">
                       {!editingMap[p.id] && (
                         <div className="flex flex-row gap-2 min-w-[120px]">
-                          <button onClick={() => startEdit(p.id)} className="text-xs px-1 py-2 bg-yellow-400 text-black rounded w-full">Editar</button>
-                          <button onClick={() => togglePublish(p)} className={`text-xs px-1 py-2 rounded w-full ${p.visible ? 'bg-gray-200 text-gray-700' : 'bg-blue-600 text-white'}`}>{p.visible ? 'Despublicar' : 'Publicar'}</button>
-                          <button onClick={() => openBulkForName(p.name)} className="text-xs px-1 py-2 bg-gray-100 text-gray-800 rounded hover:bg-gray-200 w-full">Editar grupo</button>
+                          <button onClick={() => startEdit(p.id)} className="text-xs px-1 py-2 bg-yellow-400 hover:bg-yellow-500 text-black rounded w-full">Editar</button>
+                          <button
+                            onClick={() => togglePublish(p)}
+                            className={`text-xs px-1 py-2 rounded w-full flex items-center justify-center ${p.visible ? 'bg-red-200 text-red-500 hover:bg-red-400 hover:text-white' : 'bg-red-700 hover:bg-red-800 text-white'} ${publishingId === p.id ? 'opacity-60 cursor-not-allowed' : ''}`}
+                            disabled={publishingId === p.id}
+                          >
+                            {publishingId === p.id ? (
+                              <svg className="animate-spin h-4 w-4 mr-1 text-gray-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"></path>
+                              </svg>
+                            ) : null}
+                            {p.visible ? 'Despublicar' : 'Publicar'}
+                          </button>
+                          <button
+                            onClick={() => toggleType(p)}
+                            className={`text-xs px-1 py-2 rounded w-full flex items-center justify-center ${ (p as any).type ? 'bg-green-600 text-white hover:bg-green-700' : 'bg-gray-100 text-gray-800 hover:bg-gray-200'} ${typeSavingId === p.id ? 'opacity-60 cursor-not-allowed' : ''}`}
+                            disabled={typeSavingId === p.id}
+                          >
+                            {typeSavingId === p.id ? (
+                              <svg className="animate-spin h-4 w-4 mr-1 text-gray-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"></path>
+                              </svg>
+                            ) : null}
+                            {(p as any).type ? 'Producto' : 'Suministro'}
+                          </button>
+                          <button onClick={() => openBulkForName(p.name)} className="text-xs px-1 py-2 bg-gray-200 hover:bg-gray-300 text-gray-800 rounded w-full">Editar grupo</button>
                         </div>
                       )}
                       {editingMap[p.id] && (

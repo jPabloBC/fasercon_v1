@@ -2,7 +2,7 @@ import RealtimeProductDetail from '@/components/RealtimeProductDetail'
 import Navbar from '@/components/Navbar'
 import Footer from '@/components/Footer'
 import Link from 'next/link'
-import SimilarCarousel from '@/components/SimilarCarousel'
+import RealtimeSimilarCarousel from '@/components/RealtimeSimilarCarousel'
 import { supabaseAdmin } from '@/lib/supabase'
 
 export const dynamic = 'force-dynamic'
@@ -58,6 +58,7 @@ export default async function ProductPage({ params }: { params: { id: string } }
       .from('fasercon_products')
       .select('*')
       .eq('id', id)
+      .eq('visible', true)
       .limit(1)
     product = (data && data[0]) || null
 
@@ -73,6 +74,7 @@ export default async function ProductPage({ params }: { params: { id: string } }
           .from('fasercon_products')
           .select('*')
           .eq('name', product.name)
+          .eq('visible', true)
           .order('order', { ascending: true })
         variants = (sameName || []).filter((p) => p.id !== product!.id)
       } catch (e) {
@@ -83,6 +85,7 @@ export default async function ProductPage({ params }: { params: { id: string } }
         .from('fasercon_products')
         .select('*')
         .not('id', 'eq', product.id)
+        .eq('visible', true)
         .order('order', { ascending: true })
         .limit(300)
       // Construir grupos por nombre (excluyendo el nombre actual) y elegir un representante por grupo
@@ -105,6 +108,7 @@ export default async function ProductPage({ params }: { params: { id: string } }
           .select('*')
           .not('id', 'eq', product.id)
           .not('name', 'eq', product.name) // Exclude products with the same name
+          .eq('visible', true)
           .limit(6)
   similar = shuffle(fallback || [])
       }
@@ -208,38 +212,35 @@ export default async function ProductPage({ params }: { params: { id: string } }
         />
         <div className="mx-auto max-w-7xl px-6 py-8">
           <h3 className="text-lg font-semibold">Otros productos</h3>
-          {similar && similar.length > 0 ? (
-            <SimilarCarousel
-              items={(() => {
-                // Re-mapea a items agrupados, marcando multi=true si hay más de una variante con ese nombre
-                const groups = new Map<string, { rep: DBProductRow; count: number }>()
-                for (const s of similar) {
-                  const key = String(s.name || '').trim().toLowerCase()
-                  if (!groups.has(key)) groups.set(key, { rep: s, count: 1 })
-                  else {
-                    const v = groups.get(key)!
-                    groups.set(key, { rep: v.rep, count: v.count + 1 })
-                  }
+          <RealtimeSimilarCarousel
+            currentProductId={id}
+            initialItems={(() => {
+              // Re-mapea a items agrupados, marcando multi=true si hay más de una variante con ese nombre
+              const groups = new Map<string, { rep: DBProductRow; count: number }>()
+              for (const s of similar) {
+                const key = String(s.name || '').trim().toLowerCase()
+                if (!groups.has(key)) groups.set(key, { rep: s, count: 1 })
+                else {
+                  const v = groups.get(key)!
+                  groups.set(key, { rep: v.rep, count: v.count + 1 })
                 }
-                return Array.from(groups.values()).map(({ rep, count }) => {
-                  // normalize rep.image_url (could be array or string)
-                  const imgs = Array.isArray(rep.image_url) ? rep.image_url : (rep.image_url ? [rep.image_url] : [])
-                  const cleaned = imgs.map((u: unknown) => (typeof u === 'string' ? u.trim() : '')).filter(Boolean)
-                  return {
-                    id: rep.id,
-                    name: rep.name,
-                    image_url: cleaned.length ? cleaned[0] : undefined,
-                    description: rep.description || undefined,
-                    unit_size: count > 1 ? null : (rep.unit_size || null),
-                    measurement_unit: count > 1 ? null : (rep.measurement_unit || null),
-                    multi: count > 1,
-                  }
-                })
-              })()}
-            />
-          ) : (
-            <div className="mt-4 text-sm text-gray-600">No se encontraron productos similares.</div>
-          )}
+              }
+              return Array.from(groups.values()).map(({ rep, count }) => {
+                // normalize rep.image_url (could be array or string)
+                const imgs = Array.isArray(rep.image_url) ? rep.image_url : (rep.image_url ? [rep.image_url] : [])
+                const cleaned = imgs.map((u: unknown) => (typeof u === 'string' ? u.trim() : '')).filter(Boolean)
+                return {
+                  id: rep.id,
+                  name: rep.name,
+                  image_url: cleaned.length ? cleaned[0] : undefined,
+                  description: rep.description || undefined,
+                  unit_size: count > 1 ? null : (rep.unit_size ? String(rep.unit_size) : null),
+                  measurement_unit: count > 1 ? null : (rep.measurement_unit || null),
+                  multi: count > 1,
+                }
+              })
+            })()}
+          />
         </div>
       </div>
       <Footer />

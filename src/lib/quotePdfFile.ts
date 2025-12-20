@@ -1,28 +1,6 @@
-// Utilidad para mostrar fracciones amigables
-// Removed redundant export of generateQuotePDF as a type
-function toFraction(value: string | number | null | undefined): string {
-  if (value == null || value === '') return '';
-  const num = typeof value === 'string' ? parseFloat(value) : value;
-  if (isNaN(num)) return String(value);
-  if (Number.isInteger(num)) return String(num);
-  const denominators = [2, 3, 4, 8, 16];
-  for (const d of denominators) {
-    const n = Math.round(num * d);
-    if (Math.abs(num - n / d) < 1e-6) {
-      const whole = Math.floor(num);
-      const remainder = n - whole * d;
-      if (whole > 0 && remainder > 0) {
-        return `${whole} ${remainder}/${d}`;
-      } else if (whole > 0 && remainder === 0) {
-        return `${whole}`;
-      } else {
-        return `${n}/${d}`;
-      }
-    }
-  }
-  return num.toFixed(2);
-}
+// Utilities for PDF generation
 import { PDFDocument, rgb, StandardFonts, PDFName } from 'pdf-lib';
+import { formatCLP } from '@/lib/format'
 import fs from 'fs';
 import path from 'path';
 
@@ -35,9 +13,15 @@ export async function generateQuotePDF({
   contact,
   items,
   createdAt,
+  description,
+  execution_time,
+  payment_method,
 }:{
   quote_number?: string;
   correlative?: string;
+  description?: string;
+  execution_time?: string;
+  payment_method?: string;
   contact: {
     company: string;
     email: string;
@@ -130,13 +114,13 @@ export async function generateQuotePDF({
 
     // Fondo rojo a la derecha del logo
     // Texto completo y ajuste automático para que siempre se vea
-    const infoText = 'Web: fasercon.cl   -   Email: ventas@ingenit.cl   -   Tel.: +56 9 9868 0862';
+    const infoText = 'Web: fasercon.cl   -   Email: ventas@fasercon.cl   -   Tel.: +56 9 9868 0862';
     let fontSize = 10;
     const infoX = sideMargin + drawWidth + 18;
     const infoY = height - headerHeight + 21; // subido 16px respecto a antes
     const infoHeight = fontSize + 10;
     const infoWidth = width - infoX - sideMargin;
-    const textFont = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+    const textFont = await pdfDoc.embedFont(StandardFonts.Helvetica);
     let textWidth = textFont.widthOfTextAtSize(infoText, fontSize);
     // Si el texto no cabe, reducir el fontSize hasta que quepa
     while (textWidth > infoWidth - 16 && fontSize > 9) {
@@ -344,17 +328,165 @@ export async function generateQuotePDF({
     color: textColor,
   });
 
-  // Mover y hacia abajo después del bloque
-  y = blockY - blockHeight - 18; // mt para 'PRODUCTOS' respecto a datos del cliente
+  // Mover y hacia abajo después del bloque (reducir espacio antes de 'Descripción')
+  y = blockY - blockHeight - 12; // espacio reducido entre DATOS DEL CLIENTE y Descripción
 
-  // Título 'PRODUCTOS' con el mismo estilo y color, mb ligeramente mayor respecto a la lista de productos
-  const productosTitle = 'PRODUCTOS';
-  page.drawText(productosTitle, {
-    x: sideMargin,
-    y: y,
-    ...sectionTitleStyle,
-  });
-  y -= 6; // espacio ligeramente mayor entre 'PRODUCTOS' y encabezados de la tabla
+  // Helper function to wrap text
+  const wrapTextHelper = (text: string, font: any, fontSize: number, maxWidthPx: number): string[] => {
+    if (!text) return [];
+    const words = text.split(' ');
+    const lines: string[] = [];
+    let currentLine = '';
+    for (const word of words) {
+      const testLine = currentLine ? `${currentLine} ${word}` : word;
+      const testWidth = font.widthOfTextAtSize(testLine, fontSize);
+      if (testWidth <= maxWidthPx) {
+        currentLine = testLine;
+      } else {
+        if (currentLine) lines.push(currentLine);
+        if (font.widthOfTextAtSize(word, fontSize) > maxWidthPx) {
+          let partial = '';
+          for (const ch of word) {
+            const candidate = partial + ch;
+            if (font.widthOfTextAtSize(candidate, fontSize) <= maxWidthPx) {
+              partial = candidate;
+            } else {
+              if (partial) lines.push(partial);
+              partial = ch;
+            }
+          }
+          if (partial) currentLine = partial;
+          else currentLine = '';
+        } else {
+          currentLine = word;
+        }
+      }
+    }
+    if (currentLine) lines.push(currentLine);
+    return lines;
+  };
+
+  // Descripción de la cotización (dentro de un borde gris, con padding mayor y borde redondeado)
+  if (true) { // Mostrar siempre la descripción, incluso si está vacía
+    const descLabel = 'Descripción:';
+    const descLabelSize = 10; // reducir label ligeramente
+    const descValueSize = 8; // reducir más el tamaño del texto de la descripción
+    const descLineHeight = 12; // interlínea más compacta para la descripción
+    // Ajustar padding interno: aumentar pt y reducir mucho pb según solicitud
+    const boxPaddingH = 8; // padding horizontal (izq/der) reducido
+    const boxPaddingTop = 15; // padding superior reducido adicionalmente
+    const boxPaddingBottom = 0; // padding inferior reducido a 0
+    // Preparar todas las líneas envueltas para calcular alto del contenedor
+    const firstLineLabelWidth = fontBold.widthOfTextAtSize(descLabel, descLabelSize) + 6;
+    const maxDescWidthFirstLine = width - sideMargin * 2 - firstLineLabelWidth - boxPaddingH;
+    const maxDescWidthOtherLines = width - sideMargin * 2 - boxPaddingH * 2;
+
+    const allWrappedLines: string[] = [];
+    const descriptionLines = (description || '').split('\n');
+    let isFirstLineGlobal = true;
+    for (const line of descriptionLines) {
+      if (isFirstLineGlobal) {
+        const wrapped = wrapTextHelper(line, fontRegular, descValueSize, maxDescWidthFirstLine);
+        for (const w of wrapped) allWrappedLines.push(w);
+        isFirstLineGlobal = false;
+      } else {
+        const wrapped = wrapTextHelper(line, fontRegular, descValueSize, maxDescWidthOtherLines);
+        for (const w of wrapped) allWrappedLines.push(w);
+      }
+    }
+
+    // Calculate box height based on actual first-line height and subsequent line heights
+    const linesCount = Math.max(1, allWrappedLines.length);
+    const firstLineHeight = Math.max(descLabelSize, descValueSize);
+    const boxInnerHeight = firstLineHeight + (linesCount - 1) * descLineHeight;
+    const boxHeight = boxInnerHeight + boxPaddingTop + boxPaddingBottom;
+
+    // Draw border rectangle (gris 400) with rounded corners
+    const gray400 = rgb(0.61, 0.64, 0.69);
+    const boxTopY = y;
+    const boxBottomY = boxTopY - boxHeight;
+    // pdf-lib's drawRectangle does not accept 'borderRadius' in the current types,
+    // so draw a plain rectangle with a border instead.
+    page.drawRectangle({
+      x: sideMargin,
+      y: boxBottomY,
+      width: width - sideMargin * 2,
+      height: boxHeight,
+      borderColor: gray400,
+      borderWidth: 1,
+      color: undefined,
+    });
+
+    // Draw label and lines inside box. Text must start immediately to the right of the label.
+    let cursorY = boxTopY - boxPaddingTop - (firstLineHeight / 2) + (descValueSize / 2);
+    // Baseline: draw label and first line on the same y
+    page.drawText(descLabel, {
+      x: sideMargin + boxPaddingH,
+      y: cursorY,
+      size: descLabelSize,
+      font: fontBold,
+      color: textColor,
+    });
+
+    const contentStartX = sideMargin + boxPaddingH + firstLineLabelWidth;
+    let drawnFirst = false;
+    for (const line of allWrappedLines) {
+      const xPos = !drawnFirst ? contentStartX : (sideMargin + boxPaddingH);
+      page.drawText(line, {
+        x: xPos,
+        y: cursorY,
+        size: descValueSize,
+        font: fontRegular,
+        color: textColor,
+      });
+      drawnFirst = true;
+      cursorY -= descLineHeight;
+    }
+
+    // Update y to be just below the box
+    const descToFieldsGap = 20; // espacio entre Descripción y los campos de ejecución/pago (was 8)
+    y = boxBottomY - descToFieldsGap;
+  }
+
+  // Mostrar Tiempo de ejecución y Forma de pago (si existen o no) justo antes de la lista de productos
+  const labelSize = 10;
+  const valueSize = 9;
+  const gap = 6;
+  // Container label/value en dos columnas
+  const colLeftX = sideMargin;
+
+  // Siempre dibujar las etiquetas en cajas con borde. Si el valor es vacío, mostrar '-'
+  const fieldBoxPaddingH = 5; // padding horizontal
+  const fieldBoxPaddingV = 8; // aumentar padding vertical (pt/pb) ligeramente
+  const gray400 = rgb(0.61, 0.64, 0.69);
+  const containerInnerWidth = width - sideMargin * 2;
+  const boxGap = 12; // espacio entre las dos cajas
+  const leftBoxWidth = Math.round((containerInnerWidth - boxGap) / 2);
+  const rightBoxWidth = Math.round((containerInnerWidth - boxGap) / 2);
+  const rightBoxX = sideMargin + leftBoxWidth + boxGap;
+
+  const fieldBoxHeight = Math.max(labelSize, valueSize) + fieldBoxPaddingV * 2;
+
+  // Left box (Tiempo de ejecución)
+  const leftBoxTopY = y + fieldBoxPaddingV + Math.max(labelSize, valueSize) / 2;
+  const leftBoxBottomY = leftBoxTopY - fieldBoxHeight;
+  page.drawRectangle({ x: colLeftX, y: leftBoxBottomY, width: leftBoxWidth, height: fieldBoxHeight, borderColor: gray400, borderWidth: 1, color: undefined, });
+  const fieldTextYOffset = 6; // subir ligeramente los textos dentro de las cajas
+  const leftTextY = leftBoxTopY - fieldBoxPaddingV - (labelSize / 2) + (valueSize / 2) - fieldTextYOffset;
+  page.drawText('Tiempo de ejecución / entrega:', { x: colLeftX + fieldBoxPaddingH, y: leftTextY, size: labelSize, font: fontBold, color: textColor });
+  page.drawText(String(execution_time ?? '-'), { x: colLeftX + fieldBoxPaddingH + fontBold.widthOfTextAtSize('Tiempo de ejecución / entrega:', labelSize) + 6, y: leftTextY, size: valueSize, font: fontRegular, color: textColor });
+
+  // Right box (Forma de pago)
+  const rightBoxTopY = y + fieldBoxPaddingV + Math.max(labelSize, valueSize) / 2;
+  const rightBoxBottomY = rightBoxTopY - fieldBoxHeight;
+  page.drawRectangle({ x: rightBoxX, y: rightBoxBottomY, width: rightBoxWidth, height: fieldBoxHeight, borderColor: gray400, borderWidth: 1, color: undefined, });
+  const rightTextY = rightBoxTopY - fieldBoxPaddingV - (labelSize / 2) + (valueSize / 2) - fieldTextYOffset;
+  page.drawText('Forma de pago:', { x: rightBoxX + fieldBoxPaddingH, y: rightTextY, size: labelSize, font: fontBold, color: textColor });
+  page.drawText(String(payment_method ?? '-'), { x: rightBoxX + fieldBoxPaddingH + fontBold.widthOfTextAtSize('Forma de pago:', labelSize) + 6, y: rightTextY, size: valueSize, font: fontRegular, color: textColor });
+
+  // avanzar y por la altura de las cajas y añadir más espacio antes de la lista de productos
+  const fieldsToProductsExtra = 4; // espacio adicional reducido entre cajas de campos y tabla de productos
+  y = Math.min(leftBoxBottomY, rightBoxBottomY) - gap - fieldsToProductsExtra;
 
   // Definir la posición inicial de la tabla de productos
   const productTableStartY = y; // y después de 'PRODUCTOS'
@@ -385,12 +517,20 @@ export async function generateQuotePDF({
   // Distribución optimizada: reservar una parte para 'Código' y 'Características', dividir uniformemente
   // las últimas 6 columnas (Cantidad, Unidad, P/U, Precio, Desc, Subtotal)
   const minColWidth = 30;
-  const firstTwoPercents = [0.06, 0.44]; // Código, Características
+  const firstTwoPercents = [0.06, 0.35]; // Código, Características (aumentar Características)
   const firstWidths = firstTwoPercents.map(p => Math.max(minColWidth, Math.round(availableWidth * p)));
   const usedByFirstTwo = firstWidths[0] + firstWidths[1];
   const remainingWidth = Math.max(0, availableWidth - usedByFirstTwo);
-  const perLastCol = Math.max(minColWidth, Math.floor(remainingWidth / 6));
-  const lastCols = new Array(6).fill(perLastCol);
+  // Distribución de las últimas 6 columnas: reducir P/U, Precio, Desc%, Subtotal
+  const lastColWidths = [
+    Math.round(remainingWidth * 0.13), // Cantidad (13%)
+    Math.round(remainingWidth * 0.13), // Unidad (13%)
+    Math.round(remainingWidth * 0.17), // P/U (17%, reducido)
+    Math.round(remainingWidth * 0.17), // Precio (17%, reducido)
+    Math.round(remainingWidth * 0.10), // Desc % (10%, reducido)
+    Math.round(remainingWidth * 0.20), // Subtotal (20%, reducido)
+  ];
+  const lastCols = lastColWidths;
   // Distribute any leftover pixels to the last columns to exactly fill availableWidth
   let total = firstWidths.reduce((s, v) => s + v, 0) + lastCols.reduce((s, v) => s + v, 0);
   let idx = firstWidths.length;
@@ -413,8 +553,10 @@ export async function generateQuotePDF({
     accX += columnWidths[i];
   }
   // Small shift for 'Código' so it's not flush to the margin
-  const codeShift = 10;
+  const codeShift = 1;
   columnPositions[0] += codeShift;
+  // Adjust the width of the first column to account for the shift (reduce its width)
+  columnWidths[0] -= codeShift;
   columnHeaders.forEach((header, index) => {
     const headerWidth = fontBold.widthOfTextAtSize(header, columnHeaderStyle.size);
     const xPos = columnPositions[index] + (columnWidths[index] - headerWidth) / 2;
@@ -425,15 +567,66 @@ export async function generateQuotePDF({
     });
   });
   let productY = productTableStartY - columnHeaderHeight;
-  const baseRowHeight = 28;
+  let baseRowHeight = 28; // Will be calculated dynamically per row
   // Totales acumulados
   let totalPriceNoDiscount = 0; // suma de priceTotal antes de aplicar descuentos
   let totalNet = 0; // suma de subtotales (con descuento aplicado)
   items.forEach((item, idx) => {
     const name = item.name || '';
     const characteristics = (item.characteristics || []).join(', ');
-    const truncatedName = name.length > 60 ? `${name.substring(0, 57)}...` : name;
-    const truncatedChar = characteristics.length > 80 ? `${characteristics.substring(0, 77)}...` : characteristics;
+    
+    // Helper function to wrap text by measuring pixel width with the embedded font
+    const wrapText = (text: string, font: any, fontSize: number, maxWidthPx: number): string[] => {
+      if (!text) return [];
+      const words = text.split(' ');
+      const lines: string[] = [];
+      let currentLine = '';
+      for (const word of words) {
+        const testLine = currentLine ? `${currentLine} ${word}` : word;
+        const testWidth = font.widthOfTextAtSize(testLine, fontSize);
+        if (testWidth <= maxWidthPx) {
+          currentLine = testLine;
+        } else {
+          if (currentLine) lines.push(currentLine);
+          // If single word is longer than the max width, forcibly break it
+          if (font.widthOfTextAtSize(word, fontSize) > maxWidthPx) {
+            let partial = '';
+            for (const ch of word) {
+              const candidate = partial + ch;
+              if (font.widthOfTextAtSize(candidate, fontSize) <= maxWidthPx) {
+                partial = candidate;
+              } else {
+                if (partial) lines.push(partial);
+                partial = ch;
+              }
+            }
+            if (partial) currentLine = partial;
+            else currentLine = '';
+          } else {
+            currentLine = word;
+          }
+        }
+      }
+      if (currentLine) lines.push(currentLine);
+      return lines;
+    };
+
+    const charColumnWidth = columnWidths[1] - 20; // Available width for text in characteristics column (accounting for padding)
+    const fontSizeForCells = 8;
+    const nameLines = wrapText(name, fontRegular, fontSizeForCells, charColumnWidth);
+    const charLines = wrapText(characteristics, fontRegular, fontSizeForCells, charColumnWidth);
+
+    // Recalculate row height based on actual wrapped lines using pixel measurements
+    const lineHeightPx = Math.max(9, Math.round(fontSizeForCells * 1.1)); // tighter line height to reduce whitespace
+    const paddingTop = 6;
+    const paddingBottom = 6;
+    // Add a small spacer only if both name and characteristics exist (use fraction of line height)
+    const hasSpacer = (nameLines.length > 0 && charLines.length > 0);
+    const spacerHeight = hasSpacer ? Math.max(4, Math.round(lineHeightPx * 0.35)) : 0;
+    const totalCharLines = nameLines.length + charLines.length;
+    const blockHeight = totalCharLines * lineHeightPx + spacerHeight;
+    const minRowHeight = 28;
+    baseRowHeight = Math.max(minRowHeight, paddingTop + paddingBottom + blockHeight);
     // Calcular valor unitario, precio total (qty * update_price cuando exista) y subtotal aplicando descuento
     const unitPrice = typeof item.update_price === 'number' ? item.update_price : (typeof item.price === 'number' ? item.price : 0);
     const priceTotal = (typeof item.update_price === 'number' && typeof item.qty === 'number')
@@ -445,8 +638,12 @@ export async function generateQuotePDF({
     // Acumular totales
     totalPriceNoDiscount += priceTotal;
     totalNet += subtotal;
-      // Alternar fondo gris en las filas de productos (más visible que el lightGray anterior)
-      const altRowGray = rgb(0.97, 0.97, 0.97);
+    
+    // Debug: log SKU value
+    console.log(`[PDF] Item ${idx}: name="${item.name}", sku="${item.sku || '(empty)'}", productY=${productY}, baseRowHeight=${baseRowHeight}`);
+    
+    // Alternar fondo gris en las filas de productos (más visible que el lightGray anterior)
+    const altRowGray = rgb(0.97, 0.97, 0.97);
     const backgroundColor = idx % 2 === 0 ? rgb(1, 1, 1) : altRowGray;
     page.drawRectangle({
       x: sideMargin,
@@ -455,40 +652,83 @@ export async function generateQuotePDF({
       height: baseRowHeight,
       color: backgroundColor,
     });
-    // Código (SKU) - mostrar siempre, aunque esté vacío
-    const skuText = item.sku || '-';
+    
+    // Código (SKU) - acepta varias formas: `sku`, o `product.sku`, o `service.sku`
+    // Log completo del item para debugging
+    console.log(`[PDF] Item ${idx} completo:`, JSON.stringify({
+      name: item.name,
+      sku: item.sku,
+      product_id: (item as any).product_id,
+      product: (item as any).product ? { id: (item as any).product.id, sku: (item as any).product.sku } : null,
+      service: (item as any).service ? { id: (item as any).service.id, sku: (item as any).service.sku } : null,
+    }, null, 2));
+    
+    let skuText = '-';
+    if (item.sku && String(item.sku).trim() !== '') skuText = String(item.sku);
+    else if ((item as any).product && (item as any).product.sku && String((item as any).product.sku).trim() !== '') skuText = String((item as any).product.sku);
+    else if ((item as any).service && (item as any).service.sku && String((item as any).service.sku).trim() !== '') skuText = String((item as any).service.sku);
+    // Fallback: show product_id or nested id if SKU missing
+    if ((skuText === '-' || skuText.trim() === '') && (item as any).product_id) {
+      skuText = String((item as any).product_id);
+    } else if ((skuText === '-' || skuText.trim() === '') && (item as any).product && (item as any).product.id) {
+      skuText = String((item as any).product.id);
+    } else if ((skuText === '-' || skuText.trim() === '') && (item as any).service && (item as any).service.id) {
+      skuText = String((item as any).service.id);
+    }
+    
+    console.log(`[PDF] Item ${idx}: resolved SKU = "${skuText}"`);
+    
     const skuTextWidth = fontRegular.widthOfTextAtSize(skuText, 8);
     const skuColumnWidth = columnWidths[0];
-    // Centrar el dato SKU en la columna 'Código', pero movido un poco a la izquierda
+    const skuColumnStart = columnPositions[0];
+    // Centrar el SKU en su columna
+    const skuX = skuColumnStart + Math.max(4, (skuColumnWidth - skuTextWidth) / 2);
+    const skuY = productY - baseRowHeight / 2;
+    
+    console.log(`[PDF] Drawing SKU "${skuText}" at x=${skuX}, y=${skuY}, columnStart=${skuColumnStart}, columnWidth=${skuColumnWidth}`);
+    
     page.drawText(skuText, {
-      x: columnPositions[0] + (skuColumnWidth - skuTextWidth) / 2 - 4, // 6px más a la izquierda
-      y: productY - baseRowHeight / 2,
+      x: skuX,
+      y: skuY,
       size: 8,
       font: fontRegular,
       color: darkGray,
     });
 
-    // Características (nombre arriba, características abajo, ambos alineados a la izquierda)
-    // Mover 'Características' y sus datos más a la derecha
-    page.drawText(truncatedName, {
-      x: columnPositions[1] + 16, // 16px más a la derecha
-      y: productY - 10,
-      size: 8,
-      font: fontRegular,
-      color: darkGray,
-    });
-    page.drawText(truncatedChar, {
-      x: columnPositions[1] + 16, // 16px más a la derecha
-      y: productY - 22,
-      size: 8,
-      font: fontRegular,
-      color: darkGray,
-    });
+    // Características (nombre arriba, características abajo), posicionar texto desde el tope de la fila
+    // Center the block of lines vertically within the row
+    const centerY = productY - baseRowHeight / 2;
+    // Compute the first baseline so the whole block is vertically centered
+    const firstBaselineY = centerY + (blockHeight / 2) - Math.round(lineHeightPx / 2);
+    let charY = Math.round(firstBaselineY);
+    // Draw wrapped name lines
+    for (const nameLine of nameLines) {
+      page.drawText(nameLine, {
+        x: columnPositions[1] + 20,
+        y: charY,
+        size: fontSizeForCells,
+        font: fontRegular,
+        color: darkGray,
+      });
+      charY -= lineHeightPx;
+    }
+    if (hasSpacer) {
+      charY -= spacerHeight;
+    }
+    for (const charLine of charLines) {
+      page.drawText(charLine, {
+        x: columnPositions[1] + 20,
+        y: charY,
+        size: fontSizeForCells,
+        font: fontRegular,
+        color: darkGray,
+      });
+      charY -= lineHeightPx;
+    }
     // Unidad (now after Cantidad)
-    if (item.unit_size && item.measurement_unit) {
+    if (item.measurement_unit) {
       const symbol = unitSymbols[item.measurement_unit] ?? item.measurement_unit;
-      const unitSizeStr = toFraction(item.unit_size);
-      const unitText = `${unitSizeStr}${symbol ? ' ' + symbol : ''}`;
+      const unitText = symbol || '';
       const unitTextWidth = fontRegular.widthOfTextAtSize(unitText, 8);
       const unitColumnWidth = columnWidths[3];
       page.drawText(unitText, {
@@ -510,23 +750,25 @@ export async function generateQuotePDF({
       font: fontRegular,
       color: darkGray,
     });
-    // Valor unitario
-    const unitText = unitPrice ? `$${unitPrice.toLocaleString('es-CL')}` : '-';
+    // Valor unitario - alineado a la derecha
+    const unitText = unitPrice ? `$ ${formatCLP(unitPrice)}` : '-';
     const unitTextWidth = fontRegular.widthOfTextAtSize(unitText, 8);
     const unitColumnWidth = columnWidths[4];
+    const unitColumnEnd = columnPositions[4] + unitColumnWidth;
     page.drawText(unitText, {
-      x: columnPositions[4] + (unitColumnWidth - unitTextWidth) / 2,
+      x: unitColumnEnd - unitTextWidth - 6, // Alineado a la derecha con pequeño padding
       y: productY - baseRowHeight / 2,
       size: 8,
       font: fontRegular,
       color: darkGray,
     });
-    // Precio (qty * unitPrice)
-    const priceText = priceTotal ? `$${priceTotal.toLocaleString('es-CL')}` : '-';
+    // Precio (qty * unitPrice) - alineado a la derecha
+    const priceText = priceTotal ? `$ ${formatCLP(priceTotal)}` : '-';
     const priceTextWidth = fontRegular.widthOfTextAtSize(priceText, 8);
     const priceColumnWidth = columnWidths[5];
+    const priceColumnEnd = columnPositions[5] + priceColumnWidth;
     page.drawText(priceText, {
-      x: columnPositions[5] + (priceColumnWidth - priceTextWidth) / 2,
+      x: priceColumnEnd - priceTextWidth - 6, // Alineado a la derecha con pequeño padding
       y: productY - baseRowHeight / 2,
       size: 8,
       font: fontRegular,
@@ -543,12 +785,13 @@ export async function generateQuotePDF({
       font: fontRegular,
       color: darkGray,
     });
-    // Subtotal
-    const subtotalText = subtotal ? `$${subtotal.toLocaleString('es-CL')}` : '-';
+    // Subtotal - alineado a la derecha
+    const subtotalText = subtotal ? `$ ${formatCLP(subtotal)}` : '-';
     const subtotalTextWidth = fontRegular.widthOfTextAtSize(subtotalText, 8);
     const subtotalColumnWidth = columnWidths[7];
+    const subtotalColumnEnd = columnPositions[7] + subtotalColumnWidth;
     page.drawText(subtotalText, {
-      x: columnPositions[7] + (subtotalColumnWidth - subtotalTextWidth) / 2,
+      x: subtotalColumnEnd - subtotalTextWidth - 6, // Alineado a la derecha con pequeño padding
       y: productY - baseRowHeight / 2,
       size: 8,
       font: fontRegular,
@@ -648,36 +891,31 @@ export async function generateQuotePDF({
   let rowY = firstRowY;
 
   page.drawText('Total Neto Sin Descuento:', { x: labelX, y: rowY + textYOffset, size: totalsLabelSize, font: fontBold, color: totalsTextColor });
-  const v1 = `$${totalNoDiscountRounded.toLocaleString('es-CL')}`;
+  const v1 = `$ ${formatCLP(totalNoDiscountRounded)}`;
   const v1w = fontBold.widthOfTextAtSize(v1, totalsValueSize);
   page.drawText(v1, { x: valueX - v1w, y: rowY + textYOffset, size: totalsValueSize, font: fontBold, color: totalsTextColor });
   rowY -= 18;
 
   page.drawText('Total Neto:', { x: labelX, y: rowY + textYOffset, size: totalsLabelSize, font: fontBold, color: totalsTextColor });
-  const v2 = `$${totalNetRounded.toLocaleString('es-CL')}`;
+  const v2 = `$ ${formatCLP(totalNetRounded)}`;
   const v2w = fontBold.widthOfTextAtSize(v2, totalsValueSize);
   page.drawText(v2, { x: valueX - v2w, y: rowY + textYOffset, size: totalsValueSize, font: fontBold, color: totalsTextColor });
   rowY -= 18;
 
   page.drawText('IVA (19%):', { x: labelX, y: rowY + textYOffset, size: totalsLabelSize, font: fontBold, color: totalsTextColor });
-  const v3 = `$${iva.toLocaleString('es-CL')}`;
+  const v3 = `$ ${formatCLP(iva)}`;
   const v3w = fontBold.widthOfTextAtSize(v3, totalsValueSize);
   page.drawText(v3, { x: valueX - v3w, y: rowY + textYOffset, size: totalsValueSize, font: fontBold, color: totalsTextColor });
   rowY -= 18;
 
   page.drawText('TOTAL:', { x: labelX, y: rowY + textYOffset, size: totalsLabelSize, font: fontBold, color: totalsTextColor });
-  const v4 = `$${totalWithIva.toLocaleString('es-CL')}`;
+  const v4 = `$ ${formatCLP(totalWithIva)}`;
   const v4w = fontBold.widthOfTextAtSize(v4, totalsValueSize);
   // Resaltar el TOTAL en rojo para mayor énfasis, manteniendo el resto en gris oscuro
   page.drawText(v4, { x: valueX - v4w, y: rowY + textYOffset, size: totalsValueSize, font: fontBold, color: primaryRed });
 
   // Asegurar que los títulos sean visibles dibujándolos después del borde
-  // Título 'PRODUCTOS'
-  page.drawText(productosTitle, {
-    x: sideMargin,
-    y: productTableStartY + 6, // Ajustar para que no se superponga con el borde
-    ...sectionTitleStyle,
-  });
+  // (Removed obsolete productosTitle reference - description is drawn above if present)
 
   // ============= FOOTER =============
   // Reduce the height of the footer and decrease the text size
@@ -742,9 +980,9 @@ export async function generateQuotePDF({
 
   // ============= DISCLAIMER =============
   const disclaimerText = 'Esta cotización constituye una propuesta comercial basada en la información disponible a la fecha. Los precios, condiciones y plazos indicados son válidos por 5 días y pueden estar sujetos a cambios sin previo aviso. La aceptación de esta cotización debe formalizarse por escrito para su posterior ejecución.';
-  const disclaimerTextSize = 10; // Mantener tamaño del texto
-  const disclaimerHeight = 82;
-  const disclaimerY = 40; // Posicionar encima del footer
+  const disclaimerTextSize = 9; // reducir tamaño del texto
+  const disclaimerHeight = 56; // reducir alto del recuadro
+  const disclaimerY = 36; // acercar un poco al footer
 
   // Dibujar el borde gris
   page.drawRectangle({
@@ -758,7 +996,7 @@ export async function generateQuotePDF({
   });
 
   // Dibujar el texto dentro del borde con ajuste para evitar desbordamiento
-  const disclaimerPadding = 20; // Añadir padding
+  const disclaimerPadding = 8; // reducir padding interno para ganar espacio
   const disclaimerTextX = sideMargin + disclaimerPadding; // Margen interno izquierdo con padding
   const disclaimerTextY = disclaimerY + disclaimerHeight - disclaimerPadding; // Ajustar para que el texto no desborde hacia abajo
   page.drawText(disclaimerText, {
@@ -767,7 +1005,7 @@ export async function generateQuotePDF({
     size: disclaimerTextSize,
     font: fontRegular,
     color: rgb(0.6, 0.6, 0.6), // Mantener color del texto al del borde
-    lineHeight: 15, // Mantener interlineado
+    lineHeight: 12,
     maxWidth: width - sideMargin * 2 - disclaimerPadding * 2, // Ajustar ancho máximo para que el texto no salga del borde
   });
 
