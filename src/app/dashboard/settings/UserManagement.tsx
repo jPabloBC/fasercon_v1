@@ -123,6 +123,20 @@ export default function UserManagement() {
     return str.replace(/\b\w/g, (char) => char.toUpperCase());
   }
 
+  // Map screen IDs to Spanish labels
+  const screenLabels: Record<string, string> = {
+    "overview": "Resumen",
+    "products": "Productos",
+    "clients": "Clientes",
+    "quotes": "Cotizaciones",
+    "contacts": "Contactos",
+    "contact-form": "Formulario",
+    "suppliers": "Proveedores",
+    "services": "Servicios",
+  };
+
+  const AVAILABLE_SCREENS = ["overview", "products", "clients", "quotes", "contacts", "contact-form", "suppliers", "services"];
+
 
   const { data: session } = useSession();
 
@@ -223,10 +237,10 @@ export default function UserManagement() {
           />
           
           {newUser.role === "user" && (
-            <div className="mb-2">
+            <div className="mb-2 col-span-1 sm:col-span-2">
               <label className="block text-sm font-medium text-gray-700 mb-1">Pantallas permitidas</label>
-              <div className="space-y-2">
-                {["dashboard", "products", "services", "quotes", "contact"].map((screen) => (
+              <div className="grid grid-cols-2 gap-3">
+                {AVAILABLE_SCREENS.map((screen) => (
                   <label key={screen} className="flex items-center space-x-2">
                     <input
                       type="checkbox"
@@ -241,7 +255,7 @@ export default function UserManagement() {
                       }}
                       className="h-4 w-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
                     />
-                    <span className="text-sm text-gray-700 capitalize">{screen}</span>
+                    <span className="text-sm text-gray-700">{screenLabels[screen]}</span>
                   </label>
                 ))}
               </div>
@@ -395,8 +409,8 @@ export default function UserManagement() {
             {editUser.role === "user" && (
               <div className="mb-4">
                 <label className="block text-sm font-medium text-gray-700 mb-1">Pantallas permitidas</label>
-                <div className="space-y-2">
-                  {["dashboard", "products", "services", "quotes", "contact"].map((screen) => (
+                <div className="grid grid-cols-2 gap-3">
+                  {AVAILABLE_SCREENS.map((screen) => (
                     <label key={screen} className="flex items-center space-x-2">
                       <input
                         type="checkbox"
@@ -411,7 +425,7 @@ export default function UserManagement() {
                         }}
                         className="h-4 w-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
                       />
-                      <span className="text-sm text-gray-700 capitalize">{screen}</span>
+                      <span className="text-sm text-gray-700">{screenLabels[screen]}</span>
                     </label>
                   ))}
                 </div>
