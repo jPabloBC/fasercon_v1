@@ -56,16 +56,31 @@ interface Product {
   // Add other relevant fields as needed
 }
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
-    // Obtener todas las cotizaciones
+    // Detectar empresa desde query param o header
+    const url = new URL(request.url)
+    const companyParam = url.searchParams.get('company') || 'fasercon'
+
+    // Validar empresa
+    if (!['fasercon', 'rym', 'vimal'].includes(companyParam)) {
+      return NextResponse.json(
+        { error: 'Empresa inválida' },
+        { status: 400 }
+      )
+    }
+
+    const quotesTable = `${companyParam}_quotes`
+    const itemsTable = `${companyParam}_quote_items`
+
+    // Obtener todas las cotizaciones de la empresa
     const { data: quotes, error } = await supabase
-      .from('fasercon_quotes')
+      .from(quotesTable)
       .select('*')
       .order('created_at', { ascending: false })
 
     if (error) {
-      console.error('Error fetching quotes:', error)
+      console.error('Error fetching quotes from', quotesTable, ':', error)
       return NextResponse.json(
         { error: 'Error al obtener las cotizaciones' },
         { status: 500 }
@@ -78,7 +93,7 @@ export async function GET() {
     let productsById: Record<string, unknown> = {}
     if (quoteIds.length > 0) {
       const { data: items, error: itemsError } = await supabase
-        .from('fasercon_quote_items')
+        .from(itemsTable)
         .select('*')
         .in('quote_id', quoteIds)
       console.log('[DEBUG] Items fetched:', items?.length || 0, 'Error:', itemsError);
@@ -86,20 +101,23 @@ export async function GET() {
         // Obtener todos los productos relacionados a los items
         const productIds = Array.from(new Set(items.map(i => i.product_id).filter(Boolean)))
         if (productIds.length > 0) {
+          const productsTable = `${companyParam}_products`
+          const servicesTable = `${companyParam}_quote_services`
+
           const { data: products, error: prodErr } = await supabase
-            .from('fasercon_products')
+            .from(productsTable)
             .select('*')
             .in('id', productIds)
           if (!prodErr && Array.isArray(products)) {
             productsById = products.reduce((acc, p) => { acc[p.id] = p; return acc }, {} as Record<string, unknown>)
           }
 
-          // For any product_ids not found in fasercon_products, try fetching them from fasercon_quote_services
+          // For any product_ids not found in products table, try fetching them from services table
           const remainingIds = productIds.filter(id => !productsById[String(id)]);
           if (remainingIds.length > 0) {
             try {
               const { data: services, error: servErr } = await supabase
-                .from('fasercon_quote_services')
+                .from(servicesTable)
                 .select('*')
                 .in('id', remainingIds);
               if (!servErr && Array.isArray(services)) {
@@ -152,6 +170,23 @@ export async function GET() {
           acc[item.quote_id].push({ ...item, characteristics, product });
           return acc;
   }, {} as Record<string, unknown[]>)
+        // Ensure deterministic ordering per-quote: prefer `orden`, fallback to `created_at`
+        Object.keys(itemsByQuote).forEach(qid => {
+          const arr = itemsByQuote[qid] as any[];
+          if (!Array.isArray(arr) || arr.length === 0) return;
+          const hasOrden = arr.some(it => it && (it.orden !== undefined && it.orden !== null));
+          const hasCreated = arr.some(it => it && it.created_at);
+          if (hasOrden) {
+            arr.sort((a,b) => (Number(a.orden || 0) - Number(b.orden || 0)));
+          } else if (hasCreated) {
+            arr.sort((a,b) => {
+              const ta = a.created_at ? new Date(a.created_at).getTime() : 0;
+              const tb = b.created_at ? new Date(b.created_at).getTime() : 0;
+              return ta - tb;
+            });
+          }
+          itemsByQuote[qid] = arr;
+        });
       }
     }
 

@@ -25,6 +25,7 @@ type User = {
 };
 
 export default function UserManagement() {
+  const [selectedCompany, setSelectedCompany] = useState<string>('fasercon');
   const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
@@ -44,14 +45,19 @@ export default function UserManagement() {
 
   useEffect(() => {
     fetchUsers();
-  }, []);
+  }, [selectedCompany]);
 
   useEffect(() => {
-    // Generate predictive email
+    // Generate predictive email based on company
     if (newUser.name && newUser.last_name) {
       const firstLetter = newUser.name.charAt(0).toLowerCase();
       const lastName = newUser.last_name.split(" ")[0].toLowerCase();
-      const email = `${firstLetter}${lastName}@fasercon.cl`;
+
+      let domain = 'fasercon.cl';
+      if (selectedCompany === 'rym') domain = 'rymaceros.cl';
+      if (selectedCompany === 'vimal') domain = 'vimal.cl';
+
+      const email = `${firstLetter}${lastName}@${domain}`;
       setNewUser((prev) => ({ ...prev, email }));
 
       // Generate predictive password
@@ -59,12 +65,18 @@ export default function UserManagement() {
       const password = `${lastName.charAt(0).toUpperCase()}${lastName.slice(1)}_${randomText}`;
       setNewUser((prev) => ({ ...prev, password }));
     }
-  }, [newUser.name, newUser.last_name]);
+  }, [newUser.name, newUser.last_name, selectedCompany]);
 
   async function fetchUsers() {
     setLoading(true);
     setError(null);
-  const { data, error } = await supabase.from("fasercon_users").select("id, email, password, name, role, is_active, created_at, updated_at, last_login, last_name, phone, screens");
+
+    const tableName = `${selectedCompany}_users`;
+
+    const { data, error } = await supabase
+      .from(tableName)
+      .select("id, email, password, name, role, is_active, created_at, updated_at, last_login, last_name, phone, screens");
+
     if (error) {
       setError(error.message);
     } else if (data) {
@@ -82,12 +94,16 @@ export default function UserManagement() {
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify(userData),
+        body: JSON.stringify({
+          ...userData,
+          company: selectedCompany,
+        }),
       });
       const result = await response.json();
       if (response.ok) {
         alert('Usuario creado exitosamente');
         setNewUser({ name: '', last_name: '', email: '', password: '', role: 'user', phone: '', screens: [] });
+        await fetchUsers();
       } else {
         console.error('Error al crear usuario:', result.error);
         alert('Error al crear usuario');
@@ -113,7 +129,14 @@ export default function UserManagement() {
   async function handleDeleteUser(userId: string) {
     if (!userId) return;
     if (session?.user?.role !== "dev") return;
-    const { error } = await supabase.from("fasercon_users").delete().eq("id", userId);
+
+    const tableName = `${selectedCompany}_users`;
+
+    const { error } = await supabase
+      .from(tableName)
+      .delete()
+      .eq("id", userId);
+
     if (error) {
       alert("Error al eliminar usuario: " + error.message);
     } else {
@@ -125,6 +148,21 @@ export default function UserManagement() {
   return (
     <div className="w-full overflow-x-hidden">
       <h1 className="text-2xl font-bold mb-4">Gestión de Usuarios</h1>
+
+      {/* Selector de Empresa */}
+      <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded">
+        <label className="block text-sm font-semibold mb-2">Seleccionar Empresa</label>
+        <select
+          value={selectedCompany}
+          onChange={(e) => setSelectedCompany(e.target.value)}
+          className="w-full md:w-64 border border-gray-300 p-2 rounded"
+        >
+          <option value="fasercon">Fasercon</option>
+          <option value="rym">RYM Aceros</option>
+          <option value="vimal">Vimal</option>
+        </select>
+      </div>
+
       {error && <div className="text-red-500">Error: {error}</div>}
 
       <div className="mb-4">

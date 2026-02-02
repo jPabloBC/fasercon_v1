@@ -69,8 +69,11 @@ export default function DashboardPage() {
 
   const fetchData = async () => {
     try {
+      // Get company from session
+      const company = session?.user?.company || 'fasercon'
+
       // Fetch quotes
-      const quotesResponse = await fetch('/api/quotes')
+      const quotesResponse = await fetch(`/api/quotes?company=${company}`)
       if (!quotesResponse.ok) {
         throw new Error(`HTTP error! status: ${quotesResponse.status}`)
       }
@@ -79,7 +82,7 @@ export default function DashboardPage() {
       setQuotes(quotesArray)
 
       // Fetch contacts
-      const contactsResponse = await fetch('/api/contact')
+      const contactsResponse = await fetch(`/api/contact?company=${company}`)
       if (!contactsResponse.ok) {
         throw new Error(`HTTP error! status: ${contactsResponse.status}`)
       }

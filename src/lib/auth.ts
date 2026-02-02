@@ -3,6 +3,13 @@ import CredentialsProvider from 'next-auth/providers/credentials'
 import bcrypt from 'bcryptjs'
 import { supabase } from '@/lib/supabase'
 
+// Detectar empresa desde el dominio del email
+function detectCompanyFromEmail(email: string): string {
+  if (email.includes('@rymaceros.cl') || email.includes('@rym.')) return 'rym'
+  if (email.includes('@vimal.cl') || email.includes('@vimal.')) return 'vimal'
+  return 'fasercon' // Default para @fasercon.cl
+}
+
 export const authOptions: NextAuthOptions = {
   providers: [
     CredentialsProvider({
@@ -17,8 +24,18 @@ export const authOptions: NextAuthOptions = {
           return null
         }
 
+        // Detectar empresa desde el dominio del email
+        const company = detectCompanyFromEmail(credentials.email)
+        const tableName = `${company}_users`
+
+        console.log('[AUTH] Intento de login:', {
+          email: credentials.email,
+          company,
+          tableName
+        })
+
         const { data: user, error } = await supabase
-          .from('fasercon_users')
+          .from(tableName)
           .select('*')
           .eq('email', credentials.email)
           .eq('is_active', true)
@@ -27,18 +44,16 @@ export const authOptions: NextAuthOptions = {
         console.log('Login intento:', {
           email: credentials.email,
           user,
-          error
+          error,
+          tableName
         })
 
-          if (error || !user) {
-            console.log("[AUTH] Usuario no encontrado", credentials.email);
-            throw new Error("El correo no existe");
+        if (error || !user) {
+          console.log("[AUTH] Usuario no encontrado en", tableName, credentials.email)
+          throw new Error("El correo no existe")
         }
 
-        console.log('Comparando password:', {
-          inputPassword: credentials.password,
-          dbHash: user.password
-        })
+        console.log('Comparando password')
 
         const isPasswordValid = await bcrypt.compare(
           credentials.password,
@@ -47,21 +62,22 @@ export const authOptions: NextAuthOptions = {
 
         console.log('¿Password válido?', isPasswordValid)
 
-          if (!isPasswordValid) {
-            throw new Error("Contraseña incorrecta");
+        if (!isPasswordValid) {
+          throw new Error("Contraseña incorrecta")
         }
 
-        // Actualizar last_login al hacer login exitoso
+        // Actualizar last_login
         await supabase
-          .from('fasercon_users')
+          .from(tableName)
           .update({ last_login: new Date().toISOString() })
-          .eq('id', user.id);
+          .eq('id', user.id)
 
         return {
           id: user.id,
           email: user.email,
           name: user.name,
           role: user.role,
+          company: company, // ← AGREGAR COMPANY
           screens: Array.isArray(user.screens) ? user.screens : [],
         }
       }
@@ -73,11 +89,12 @@ export const authOptions: NextAuthOptions = {
   callbacks: {
     async jwt({ token, user }) {
       if (user) {
-          return {
-            ...token,
-            role: user.role,
-            screens: Array.isArray(user.screens) ? user.screens : [],
-          }
+        return {
+          ...token,
+          role: user.role,
+          company: user.company, // ← AGREGAR COMPANY
+          screens: Array.isArray(user.screens) ? user.screens : [],
+        }
       }
       return token
     },
@@ -87,7 +104,8 @@ export const authOptions: NextAuthOptions = {
         user: {
           ...session.user,
           role: token.role,
-            screens: Array.isArray(token.screens) ? token.screens : [],
+          company: token.company, // ← AGREGAR COMPANY
+          screens: Array.isArray(token.screens) ? token.screens : [],
         }
       }
     }
