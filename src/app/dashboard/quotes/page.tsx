@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, Fragment } from "react";
 import { State, City } from 'country-state-city';
 import Image from 'next/image'
 import ProductCreateForm from '@/components/ProductCreateForm'
 import { PhotoIcon } from '@heroicons/react/24/outline'
+import { Loader } from 'lucide-react'
 import { Pair, NewProduct } from '@/lib/types'
 import PhoneInput, { isValidPhoneNumber } from 'react-phone-number-input';
 import 'react-phone-number-input/style.css';
@@ -79,7 +80,11 @@ export default function QuotesPage() {
   const [editedPrices, setEditedPrices] = useState<Record<string, number>>({});
   const [editedQtys, setEditedQtys] = useState<Record<string, number>>({});
   const [originalOrder, setOriginalOrder] = useState<string[]>([]);
+  const [draggingId, setDraggingId] = useState<string | null>(null);
+  const [dropIndex, setDropIndex] = useState<number | null>(null);
   const [editedDiscounts, setEditedDiscounts] = useState<Record<string, number>>({}) // porcentaje
+  const [editedUnits, setEditedUnits] = useState<Record<string, string>>({}) // unidades de medida
+  const [editedCharacteristics, setEditedCharacteristics] = useState<Record<string, string[]>>({}) // características por item
   const [sending, setSending] = useState(false);
   const [versionsModalOpen, setVersionsModalOpen] = useState(false);
   const [versionsList, setVersionsList] = useState<any[]>([]);
@@ -90,6 +95,7 @@ export default function QuotesPage() {
   // Estado para saber qué cotización está previsualizando PDF
   const [previewingPdfId, setPreviewingPdfId] = useState<string | null>(null);
   const [savingDraft, setSavingDraft] = useState(false);
+  const [savingModalChanges, setSavingModalChanges] = useState(false);
   // Estado para cotizaciones colapsadas (true = colapsada)
   const [collapsedQuotes, setCollapsedQuotes] = useState<Record<string, boolean>>({});
 
@@ -97,15 +103,47 @@ export default function QuotesPage() {
     setCollapsedQuotes((prev) => ({ ...prev, [quoteId]: !prev[quoteId] }));
   };
 
+  // Sync originalOrder across modal, selectedQuote and the main quotes list
+  const syncOriginalOrder = (updater: any) => {
+    setOriginalOrder(prev => {
+      const next: string[] = typeof updater === 'function' ? updater(prev || []) : (Array.isArray(updater) ? updater : prev || []);
+      // build ordered items from current editedQuote or selectedQuote
+      const sourceItems = (editedQuote && editedQuote.items) ? editedQuote.items : (selectedQuote && selectedQuote.items ? selectedQuote.items : []);
+      const idToItem = new Map<string, any>();
+      (sourceItems || []).forEach((it: any) => idToItem.set(it.id, it));
+      const orderedItems = (next || []).map(id => idToItem.get(id)).filter(Boolean);
+      // append any items not included in originalOrder to preserve
+      const remaining = (sourceItems || []).filter((it: any) => !((next || []).includes(it.id)));
+      const finalItems = [...orderedItems, ...remaining];
+
+      if (editedQuote) setEditedQuote(prevQ => prevQ ? ({ ...prevQ, items: finalItems }) : prevQ);
+      if (selectedQuote && (editedQuote?.id ?? selectedQuote.id) === selectedQuote.id) setSelectedQuote(prev => prev ? ({ ...prev, items: finalItems }) : prev);
+      setQuotes(prevQs => prevQs.map(q => (q.id === (editedQuote?.id ?? selectedQuote?.id) ? ({ ...q, items: finalItems }) : q)));
+      return next;
+    });
+  };
+
+  // Estados para búsqueda de productos/servicios en modal de edición
+  const [editModalProductSearchQuery, setEditModalProductSearchQuery] = useState('');
+  const [editModalProductSearchResults, setEditModalProductSearchResults] = useState<any[]>([]);
+  const [editModalShowMatches, setEditModalShowMatches] = useState(false);
+
   // Guardar precios editados en la base de datos
   async function handleSavePrices() {
+    setSavingModalChanges(true);
     // Guardar cambios de cotización (campos generales + precios por ítem)
-    if (!editedQuote) return;
+    // Mapa para relacionar IDs temporales creados en cliente con IDs reales de BD
+    const createdIdMap: Record<string, string> = {};
+    if (!editedQuote) {
+      setSavingModalChanges(false);
+      return;
+    }
     console.log('[handleSavePrices] Iniciando guardado. editedQuote:', editedQuote);
     console.log('[handleSavePrices] editedPrices:', editedPrices);
     console.log('[handleSavePrices] editedQtys:', editedQtys);
     console.log('[handleSavePrices] editedDiscounts:', editedDiscounts);
     try {
+      // Map temporal IDs to real IDs for items created during this save
       const fields = ['name', 'email', 'phone', 'description', 'execution_time', 'payment_method'];
       const quotePayload: Record<string, unknown> = {};
       for (const f of fields) {
@@ -135,52 +173,229 @@ export default function QuotesPage() {
           console.warn('Item sin ID, saltando:', item);
           continue;
         }
-        const newPrice = editedPrices[item.id] ?? item.update_price ?? item.price ?? 0;
-        const newQty = editedQtys[item.id] ?? item.qty ?? 1;
-        const newDiscount = editedDiscounts[item.id] ?? item.discount ?? 0;
-        const oldPrice = item.update_price ?? item.price ?? 0;
-        const oldQty = item.qty ?? 1;
-        const oldDiscount = item.discount ?? 0;
-
-        console.log(`[handleSavePrices] Item ${item.id} - Comparando:`, {
-          newPrice, oldPrice, priceChanged: newPrice !== oldPrice,
-          newQty, oldQty, qtyChanged: newQty !== oldQty,
-          newDiscount, oldDiscount, discountChanged: newDiscount !== oldDiscount
-        });
-
-        // Solo actualizar si el precio, cantidad o descuento cambió
-        if (newPrice !== oldPrice || newQty !== oldQty || newDiscount !== oldDiscount) {
-          const payload: Record<string, unknown> = { update_price: newPrice, qty: newQty, discount: newDiscount };
-          console.log(`[handleSavePrices] 🔄 Enviando PATCH para item ${item.id}:`, payload);
+        
+        // Detectar si es un item nuevo (ID temporal comienza con 'tmp-')
+        const isNewItem = String(item.id).startsWith('tmp-');
+        
+        if (isNewItem) {
+          // Crear nuevo item en la base de datos
+          const newChars = editedCharacteristics[item.id] ?? (Array.isArray(item.characteristics) ? item.characteristics : (typeof item.characteristics === 'string' ? (function(){ try { return JSON.parse(String(item.characteristics)) } catch { return String(item.characteristics).split(',').map(s=>s.trim()).filter(Boolean) } })() : []));
+          const payload = {
+            quote_id: editedQuote.id,
+            product_id: item.product_id,
+            name: item.name ?? '',
+            description: item.description ?? null,
+            image_url: item.image_url ?? null,
+            unit_size: item.unit_size ?? null,
+            measurement_unit: item.measurement_unit ?? '',
+            qty: editedQtys[item.id] ?? item.qty ?? 1,
+            price: item.price ?? 0,
+            update_price: editedPrices[item.id] ?? item.update_price ?? item.price ?? 0,
+            discount: editedDiscounts[item.id] ?? item.discount ?? 0,
+            company: item.company ?? null,
+            email: item.email ?? null,
+            phone: item.phone ?? null,
+            document: item.document ?? null,
+            characteristics: newChars,
+          };
+          
+          console.log(`[handleSavePrices] ➕ Creando nuevo item:`, payload);
           try {
-            const res = await fetch(`/api/quotes/items/${item.id}`, {
-              method: 'PATCH',
+            const res = await fetch('/api/quotes/items', {
+              method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify(payload),
             });
             if (!res.ok) {
               const errText = await res.text();
-              console.error(`❌ Error actualizando item ${item.id}: ${res.status}`, errText);
+              console.error(`❌ Error creando item: ${res.status}`, errText);
             } else {
               const result = await res.json();
-              console.log(`✅ Item ${item.id} actualizado correctamente. Respuesta:`, result);
+              console.log(`✅ Item creado correctamente. Respuesta:`, result);
+              // Actualizar el ID temporal con el ID real devuelto
+              const realItemId = result?.item?.id || result?.id;
+              if (realItemId) {
+                // Track mapping so we can persist ordering later in this function
+                createdIdMap[item.id] = realItemId;
+                setEditedQuote(prev => {
+                  if (!prev) return prev;
+                  const newItems = (prev.items || []).map(it => it.id === item.id ? ({ ...it, id: realItemId }) : it);
+                  return { ...prev, items: newItems };
+                });
+                setSelectedQuote(prev => {
+                  if (!prev) return prev;
+                  const newItems = (prev.items || []).map(it => it.id === item.id ? ({ ...it, id: realItemId }) : it);
+                  return { ...prev, items: newItems };
+                });
+                // Actualizar originalOrder con el ID real
+                syncOriginalOrder((prev: string[]) => prev.map(id => id === item.id ? realItemId : id));
+              }
             }
           } catch (err) {
-            console.error('Error actualizando item', item.id, err);
+            console.error('Error creando item', err);
+          }
+        } else {
+          // Actualizar item existente
+          // Compare against the original values from `selectedQuote` (not the possibly-modified `editedQuote` item)
+          const originalItem = selectedQuote?.items?.find(it => it.id === item.id) ?? null;
+          const newPrice = editedPrices[item.id] ?? item.update_price ?? item.price ?? 0;
+          const newQty = editedQtys[item.id] ?? item.qty ?? 1;
+          const newDiscount = editedDiscounts[item.id] ?? item.discount ?? 0;
+          const newUnit = editedUnits[item.id] ?? item.measurement_unit ?? '';
+          const newName = editedQuote.items?.find(it => it.id === item.id)?.name ?? item.name ?? '';
+          const oldPrice = originalItem?.update_price ?? originalItem?.price ?? item.update_price ?? item.price ?? 0;
+          const oldQty = originalItem?.qty ?? item.qty ?? 1;
+          const oldDiscount = originalItem?.discount ?? item.discount ?? 0;
+          const oldUnit = originalItem?.measurement_unit ?? item.measurement_unit ?? '';
+
+          console.log(`[handleSavePrices] Item ${item.id} - Comparando:`, {
+            newPrice, oldPrice, priceChanged: newPrice !== oldPrice,
+            newQty, oldQty, qtyChanged: newQty !== oldQty,
+            newDiscount, oldDiscount, discountChanged: newDiscount !== oldDiscount,
+            newUnit, oldUnit, unitChanged: newUnit !== oldUnit
+          });
+
+          // Solo actualizar si el precio, cantidad, descuento, unidad o características cambiaron
+          const newChars = editedCharacteristics[item.id] ?? (Array.isArray(item.characteristics) ? item.characteristics : (typeof item.characteristics === 'string' ? (function(){ try { return JSON.parse(String(item.characteristics)) } catch { return String(item.characteristics).split(',').map(s=>s.trim()).filter(Boolean) } })() : []));
+          const oldCharsRaw = originalItem?.characteristics ?? item.characteristics ?? [];
+          const oldChars = Array.isArray(oldCharsRaw) ? oldCharsRaw : (typeof oldCharsRaw === 'string' ? (function(){ try { return JSON.parse(String(oldCharsRaw)) } catch { return String(oldCharsRaw).split(',').map(s=>s.trim()).filter(Boolean) } })() : []);
+          const charsChanged = JSON.stringify(newChars) !== JSON.stringify(oldChars);
+          const nameChanged = String(newName) !== String(originalItem?.name ?? item.name ?? '');
+          if (newPrice !== oldPrice || newQty !== oldQty || newDiscount !== oldDiscount || newUnit !== oldUnit || charsChanged || nameChanged) {
+            const payload: Record<string, unknown> = { update_price: newPrice, qty: newQty, discount: newDiscount, measurement_unit: newUnit, characteristics: newChars, name: newName };
+            console.log(`[handleSavePrices] 🔄 Enviando PATCH para item ${item.id}:`, payload);
+            try {
+              const res = await fetch(`/api/quotes/items/${item.id}`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload),
+              });
+              if (!res.ok) {
+                const errText = await res.text();
+                console.error(`❌ Error actualizando item ${item.id}: ${res.status}`, errText);
+              } else {
+                const result = await res.json();
+                console.log(`✅ Item ${item.id} actualizado correctamente. Respuesta:`, result);
+                const updatedUnit = (result && (result.item?.measurement_unit ?? result.item?.unit_measure)) ?? newUnit;
+                const updatedCharsRaw = result && (result.item?.characteristics ?? null);
+                let updatedChars: any = updatedCharsRaw;
+                if (typeof updatedCharsRaw === 'string') {
+                  try { updatedChars = JSON.parse(updatedCharsRaw); } catch { updatedChars = String(updatedCharsRaw).split(',').map((s:string)=>s.trim()).filter(Boolean); }
+                }
+                // Update local editedQuote and selectedQuote to reflect new values immediately
+                setEditedQuote(prev => {
+                  if (!prev) return prev;
+                  const newItems = (prev.items || []).map(it => it.id === item.id ? ({ ...it, update_price: newPrice, qty: newQty, discount: newDiscount, measurement_unit: updatedUnit, characteristics: updatedChars ?? newChars }) : it);
+                  return { ...prev, items: newItems };
+                });
+                setSelectedQuote(prev => {
+                  if (!prev) return prev;
+                  const newItems = (prev.items || []).map(it => it.id === item.id ? ({ ...it, update_price: newPrice, qty: newQty, discount: newDiscount, measurement_unit: updatedUnit, characteristics: updatedChars ?? newChars }) : it);
+                  return { ...prev, items: newItems };
+                });
+              }
+            } catch (err) {
+              console.error('Error actualizando item', item.id, err);
+            }
           }
         }
       }
     }
 
+    // Persistir el orden actual de items (si el usuario reordenó)
+    try {
+      const finalOrder = originalOrder.map(id => (createdIdMap[id] ?? id));
+      // Also update local quotes state with final ordering so UI reflects changes
+      try {
+        const finalItems: QuoteItem[] = (editedQuote.items || []).slice();
+        const orderedItems = finalOrder
+          .map(id => finalItems.find((it: QuoteItem) => it.id === id))
+          .filter((it): it is QuoteItem => !!it);
+        // If some items are missing in finalOrder, append them
+        const missing = finalItems.filter((it: QuoteItem) => !finalOrder.includes(it.id));
+        const finalOrderedItems: QuoteItem[] = [...orderedItems, ...missing];
+        setQuotes(prev => prev.map(q => q.id === editedQuote.id ? ({ ...q, items: finalOrderedItems }) : q));
+        setSelectedQuote(prev => prev ? ({ ...prev, items: finalOrderedItems }) : prev);
+      } catch (err) {
+        console.error('Error updating local quotes order', err);
+      }
+      for (let i = 0; i < finalOrder.length; i++) {
+        const itemId = finalOrder[i];
+        if (!itemId) continue;
+        // Skip any remaining temporary IDs
+        if (String(itemId).startsWith('tmp-')) continue;
+        try {
+          const res = await fetch(`/api/quotes/items/${itemId}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ orden: i + 1 }),
+          });
+          if (!res.ok) {
+            const bodyText = await res.text().catch(() => '');
+            console.error(`Error guardando orden para item ${itemId}:`, res.status, bodyText);
+            // If backend tells us the `orden` column is missing, show actionable SQL to the user
+            try {
+              const parsed = bodyText ? JSON.parse(bodyText) : null;
+              const migrationSql = parsed?.migration_sql ?? null;
+              if (migrationSql) {
+                alert('La base de datos no tiene la columna `orden`. Para habilitar la persistencia del orden, ejecuta en tu base de datos:\n\n' + migrationSql + '\n\nPuedes ejecutar esto desde Supabase SQL editor.');
+                // Stop further attempts
+                break;
+              }
+            } catch {
+              // ignore parse errors
+            }
+          }
+        } catch (err) {
+          console.error('Error PATCH orden item', itemId, err);
+        }
+      }
+    } catch (err) {
+      console.error('Error persisting item order', err);
+    }
+
+    // Eliminar items que fueron marcados para eliminación
+    if ((editedQuote as any)?._deletedItemIds && (editedQuote as any)._deletedItemIds.length > 0) {
+      console.log(`[handleSavePrices] Eliminando ${(editedQuote as any)._deletedItemIds.length} items de la BD`);
+      for (const deletedId of (editedQuote as any)._deletedItemIds) {
+        try {
+          const res = await fetch(`/api/quotes/items/${deletedId}`, {
+            method: 'DELETE',
+            headers: { 'Content-Type': 'application/json' },
+          });
+          if (!res.ok) {
+            const errText = await res.text();
+            console.error(`❌ Error eliminando item ${deletedId}: ${res.status}`, errText);
+          } else {
+            console.log(`✅ Item ${deletedId} eliminado correctamente`);
+          }
+        } catch (err) {
+          console.error('Error eliminando item', deletedId, err);
+        }
+      }
+    }
+
     alert('Cambios guardados correctamente');
+    setSavingModalChanges(false);
+    // Close modal immediately without clearing editedQuote yet
+    setShowModal(false);
+    setOriginalOrder([]);
+    setDropIndex(null);
+    setDraggingId(null);
+    // Clear editing states
     setEditedPrices({});
     setEditedQtys({});
     setEditedDiscounts({});
+    setEditedUnits({});
+    setEditedCharacteristics({});
+    setEditModalProductSearchQuery('');
+    setEditModalProductSearchResults([]);
+    setEditModalShowMatches(false);
+    // Refresh list from database
+    await refreshQuotes();
+    // Clear editedQuote after modal is closed to avoid showing stale data
     setEditedQuote(null);
     setSelectedQuote(null);
-    setShowModal(false);
-    // Optionally, refresh list
-    refreshQuotes();
   }
 
   const visibleMainRect = useMemo(() => {
@@ -497,8 +712,9 @@ export default function QuotesPage() {
     m: 'metros (m)',
     cm: 'centímetros (cm)',
     mm: 'milímetros (mm)',
-    m2: 'm² (m2)',
-    m3: 'm³ (m3)',
+    m2: 'm²',
+    m3: 'm³',
+    m_lin: 'metro lineal (m)',
     kg: 'kilogramo (kg)',
     g: 'gramo (g)',
     ton: 'tonelada (t)',
@@ -508,6 +724,16 @@ export default function QuotesPage() {
     roll: 'rollo',
     other: 'Otro',
   };
+  function normalizeUnitKey(u: string | null | undefined) {
+    if (!u) return '';
+    if ((unitLabels as any)[u]) return u;
+    const found = Object.entries(unitLabels).find(([, v]) => v === u || v.includes(String(u)));
+    if (found) return found[0];
+    const stripped = String(u).replace(/^unidad\s+/i, '').trim();
+    const found2 = Object.entries(unitLabels).find(([, v]) => v === stripped || v.includes(stripped));
+    if (found2) return found2[0];
+    return String(u);
+  }
   // Price display state for ProductEditor
   const [newProductPriceDisplay, setNewProductPriceDisplay] = useState<string>('');
   const [unitSizeInputs, setUnitSizeInputs] = useState<string[]>([''])
@@ -651,6 +877,185 @@ export default function QuotesPage() {
     setProductSearchResults([]);
     setShowMatches(false);
   }
+
+  // Agregar producto existente a la cotización en edición (modal)
+  const addExistingProductToEditedQuote = (p: any) => {
+    if (!editedQuote) return;
+    
+    const items = Array.isArray(editedQuote.items) ? [...editedQuote.items] : [];
+    const pid = p.id ?? p.product_id ?? p.sku ?? String(Math.random());
+    const existingIndex = items.findIndex((it: any) => String(it.product_id) === String(pid));
+
+    // Si el producto ya existe, incrementar cantidad
+    if (existingIndex !== -1) {
+      items[existingIndex] = { ...items[existingIndex], qty: (Number(items[existingIndex].qty) || 1) + 1 };
+      setEditedQuote({ ...editedQuote, items });
+      setToast({ type: 'success', message: 'Cantidad incrementada' });
+    } else {
+      // Crear nuevo item
+      const newItem = {
+        id: `tmp-${Date.now()}-${Math.floor(Math.random()*1000)}`,
+        quote_id: editedQuote.id || '',
+        product_id: String(pid),
+        sku: p.sku || '',
+        name: p.name || '',
+        image_url: Array.isArray(p.image_url) ? (p.image_url[0] || null) : (p.image_url || null),
+        unit_size: p.unit_size || null,
+        measurement_unit: p.measurement_unit || null,
+        qty: 1,
+        price: p.price ?? 0,
+        update_price: p.price ?? 0,
+        discount: 0,
+        company: null,
+        email: null,
+        phone: null,
+        document: null,
+        created_at: null,
+        characteristics: p.characteristics || null,
+        product: p
+      };
+      
+      const updatedItems = [...items, newItem];
+      setEditedQuote({ ...editedQuote, items: updatedItems });
+      
+      // Actualizar originalOrder: si estaba vacío, inicializarlo; si no, agregar al final
+      setOriginalOrder((prev) => {
+        if (prev.length === 0) {
+          return updatedItems.map(it => it.id);
+        }
+        return [...prev, newItem.id];
+      });
+      
+      setToast({ type: 'success', message: 'Producto agregado a la cotización' });
+    }
+    
+    // Restablecer el buscador del modal
+    setEditModalProductSearchQuery('');
+    setEditModalProductSearchResults([]);
+    setEditModalShowMatches(false);
+  }
+
+  // Eliminar item de la cotización en edición
+  const removeItemFromEditedQuote = (itemId: string) => {
+    if (!editedQuote) return;
+    
+    // Si el item tiene ID real (no temporal), marcarlo para eliminación en DB
+    if (!String(itemId).startsWith('tmp-')) {
+      // Agregar a un array de items para eliminar (lo haremos en handleSavePrices)
+      // Por ahora, solo lo marcamos en el estado
+      setEditedQuote((prev) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          items: (prev.items || []).filter(item => item.id !== itemId),
+          _deletedItemIds: [...((prev as any)._deletedItemIds || []), itemId]
+        };
+      });
+    } else {
+      // Si es un item temporal, simplemente eliminarlo del estado
+      setEditedQuote((prev) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          items: (prev.items || []).filter(item => item.id !== itemId)
+        };
+      });
+    }
+    
+    // Eliminar de originalOrder (y sincronizar visualizaciones)
+    syncOriginalOrder((prev: string[]) => prev.filter(id => id !== itemId));
+    
+    // Limpiar estados de edición para ese item
+    setEditedPrices(prev => {
+      const newPrices = { ...prev };
+      delete newPrices[itemId];
+      return newPrices;
+    });
+    setEditedQtys(prev => {
+      const newQtys = { ...prev };
+      delete newQtys[itemId];
+      return newQtys;
+    });
+    setEditedDiscounts(prev => {
+      const newDiscounts = { ...prev };
+      delete newDiscounts[itemId];
+      return newDiscounts;
+    });
+    setEditedUnits(prev => {
+      const newUnits = { ...prev };
+      delete newUnits[itemId];
+      return newUnits;
+    });
+    setEditedCharacteristics(prev => {
+      const newChars = { ...prev };
+      delete newChars[itemId];
+      return newChars;
+    });
+    setToast({ type: 'success', message: 'Producto eliminado de la cotización' });
+  }
+
+  // Buscar productos/servicios para el modal de edición
+  const searchProductsForEditModal = async (q: string) => {
+    try {
+      if (!q || q.trim() === '') return setEditModalProductSearchResults([]);
+      const [prodRes, svcRes] = await Promise.all([
+        fetch(`/api/products?q=${encodeURIComponent(q.trim())}`),
+        fetch(`/api/quote-services?q=${encodeURIComponent(q.trim())}`),
+      ]);
+      const prodJson = prodRes.ok ? await prodRes.json() : { products: [] };
+      const svcJson = svcRes.ok ? await svcRes.json() : { services: [] };
+      const products = Array.isArray(prodJson?.products) ? prodJson.products : [];
+      const services = Array.isArray(svcJson?.services) ? svcJson.services : [];
+      
+      const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+      const rawQ = q.trim();
+      const isFullUuid = uuidRegex.test(rawQ);
+      
+      if (isFullUuid) {
+        try {
+          const byIdProd = await fetch(`/api/products/${encodeURIComponent(rawQ)}`);
+          if (byIdProd.ok) {
+            const single = await byIdProd.json();
+            const p = single && (single.product || single);
+            if (p) products.unshift(p);
+          }
+        } catch { /* ignore */ }
+        try {
+          const byIdSvc = await fetch(`/api/quote-services/${encodeURIComponent(rawQ)}`);
+          if (byIdSvc.ok) {
+            const single = await byIdSvc.json();
+            const s = single && (single.service || single);
+            if (s) services.unshift(s);
+          }
+        } catch { /* ignore */ }
+      }
+      
+      const normalizedServices = services.map((s: any) => ({
+        ...s,
+        _type: 'service',
+        name: s.title || s.name || 'Servicio',
+        sku: s.sku || s.id,
+        price: s.price ?? 0,
+        measurement_unit: s.unit_measure || s.measurement_unit || null,
+        image_url: s.image_url || (Array.isArray(s.images) ? s.images[0] : null),
+      }));
+      const normalizedProducts = products.map((p: any) => ({ ...p, _type: 'product' }));
+      
+      const merged: any[] = [];
+      const seen = new Set<string>();
+      for (const item of [...normalizedServices, ...normalizedProducts]) {
+        const key = String(item.id || item.sku || item.product_id || '');
+        if (!key) continue;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        merged.push(item);
+      }
+      setEditModalProductSearchResults(merged);
+    } catch (err) {
+      console.error(err);
+      setEditModalProductSearchResults([]);
+    }
+  };
 
   // supplier search (simple helper for the small select/search UI)
   useEffect(() => {
@@ -1249,37 +1654,211 @@ export default function QuotesPage() {
                   <h3 className="text-sm font-bold text-gray-800">Servicios / Productos</h3>
                   <span className="text-xs text-gray-500 bg-gray-100 px-2 py-1 rounded">Total: {editedQuote.items?.length ?? 0} items</span>
                 </div>
+
+                {/* Búsqueda de productos para agregar */}
+                <div className="mb-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                  <label className="font-semibold block text-xs text-gray-700 mb-2">Buscar y agregar productos/servicios</label>
+                  <div className="flex gap-2 items-start flex-wrap">
+                    <input
+                      type="text"
+                      placeholder="Buscar por nombre, código, SKU..."
+                      className="flex-1 min-w-[250px] border border-gray-300 px-3 py-2 rounded text-sm focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-200"
+                      value={editModalProductSearchQuery}
+                      onChange={(e) => {
+                        setEditModalProductSearchQuery(e.target.value);
+                        if (e.target.value.length > 1) {
+                          searchProductsForEditModal(e.target.value);
+                          setEditModalShowMatches(true);
+                        } else {
+                          setEditModalProductSearchResults([]);
+                          setEditModalShowMatches(false);
+                        }
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          searchProductsForEditModal(editModalProductSearchQuery);
+                          setEditModalShowMatches(true);
+                        }
+                      }}
+                    />
+                    <button
+                      onClick={() => {
+                        searchProductsForEditModal(editModalProductSearchQuery);
+                        setEditModalShowMatches(true);
+                      }}
+                      className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 text-sm font-medium transition-colors"
+                    >
+                      Buscar
+                    </button>
+                    {editModalProductSearchQuery && (
+                      <button
+                        onClick={() => {
+                          setEditModalProductSearchQuery('');
+                          setEditModalProductSearchResults([]);
+                          setEditModalShowMatches(false);
+                        }}
+                        className="px-4 py-2 bg-gray-300 text-gray-700 rounded hover:bg-gray-400 text-sm font-medium transition-colors"
+                      >
+                        Limpiar
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Resultados de búsqueda */}
+                  {editModalShowMatches && editModalProductSearchResults.length > 0 && (
+                    <div className="mt-3 max-h-[200px] overflow-y-auto border border-gray-300 rounded bg-white">
+                      {editModalProductSearchResults.map((product) => (
+                        <div
+                          key={product.id}
+                          className="p-3 border-b border-gray-200 hover:bg-gray-50 transition-colors flex justify-between items-center"
+                        >
+                          <div className="flex-1">
+                            <div className="font-semibold text-sm text-gray-800">{product.name}</div>
+                            <div className="text-xs text-gray-500">
+                              {product.sku && <span>SKU: {product.sku} | </span>}
+                              Precio: ${formatCLP(product.price ?? 0)}
+                            </div>
+                          </div>
+                          <button
+                            onClick={() => addExistingProductToEditedQuote(product)}
+                            className="ml-2 px-3 py-1 bg-green-600 text-white rounded hover:bg-green-700 text-xs font-medium transition-colors whitespace-nowrap"
+                          >
+                            Agregar
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {editModalShowMatches && editModalProductSearchResults.length === 0 && editModalProductSearchQuery.length > 0 && (
+                    <div className="mt-3 p-3 bg-yellow-50 border border-yellow-200 rounded text-sm text-yellow-800">
+                      No se encontraron productos o servicios que coincidan con: <strong>{editModalProductSearchQuery}</strong>
+                    </div>
+                  )}
+                </div>
+
                 <div className="overflow-x-auto border border-gray-300 rounded-lg bg-white shadow-sm">
-                <table className="min-w-full text-xs">
+                <table className="min-w-full text-xs table-auto">
                   <thead>
                     <tr className="bg-red-600 text-white">
-                      <th className="px-3 py-2 text-center font-bold border-r border-red-700">Código</th>
+                      <th className="px-2 py-2 text-center font-bold border-r border-red-700 whitespace-nowrap w-10">Orden</th>
+                      <th className="px-1 py-2 text-center font-bold border-r border-red-700 whitespace-nowrap w-20">Código</th>
                       <th className="px-3 py-2 text-left font-bold border-r border-red-700">Características</th>
-                      <th className="px-3 py-2 text-center font-bold border-r border-red-700 w-16">Cantidad</th>
-                      <th className="px-3 py-2 text-center font-bold border-r border-red-700 w-16">Unidad</th>
-                      <th className="px-3 py-2 text-center font-bold border-r border-red-700 w-24">Precio U</th>
-                      <th className="px-3 py-2 text-center font-bold border-r border-red-700 w-24">Cant. x P/U</th>
-                      <th className="px-3 py-2 text-center font-bold border-r border-red-700 w-16">Desc. %</th>
-                      <th className="px-3 py-2 text-center font-bold w-24">Subtotal</th>
+                      <th className="px-1 py-2 text-center font-bold border-r border-red-700 whitespace-nowrap w-12">Cantidad</th>
+                      <th className="px-1 py-2 text-center font-bold border-r border-red-700 whitespace-nowrap w-12">Unidad</th>
+                      <th className="px-2 py-2 text-center font-bold border-r border-red-700 whitespace-nowrap w-20">Precio U</th>
+                      <th className="px-2 py-2 text-center font-bold border-r border-red-700 whitespace-nowrap w-28">Cant. x P/U</th>
+                      <th className="px-1 py-2 text-center font-bold border-r border-red-700 whitespace-nowrap w-16">Desc. %</th>
+                      <th className="px-2 py-2 text-center font-bold border-r border-red-700 whitespace-nowrap w-28">Subtotal</th>
+                      <th className="px-2 py-2 text-center font-bold whitespace-nowrap w-12">Acciones</th>
                     </tr>
                   </thead>
-                  <tbody>
+                  <tbody onDragOver={(e) => { e.preventDefault(); if (originalOrder) setDropIndex(originalOrder.length); }} onDragLeave={() => { if (!draggingId) setDropIndex(null); }}>
                       {editedQuote.items && originalOrder.length > 0
-                        ? originalOrder.map((id) => {
+                        ? originalOrder.map((id, idx) => {
                             const item = editedQuote.items?.find(i => i.id === id);
                             if (!item) return null;
                             return (
-                              <tr key={item.id} className="border-b border-gray-300 hover:bg-gray-50 transition-colors">
-                                <td className="border-r border-gray-300 px-3 py-2 text-center font-semibold">
+                              <Fragment key={`wrap-${item.id}`}>
+                                {dropIndex === idx && draggingId && (
+                                  <tr key={`placeholder-${idx}`} className="h-4">
+                                    <td colSpan={12} className="px-2 py-1">
+                                      <div className="w-full h-1 bg-red-400 rounded" />
+                                    </td>
+                                  </tr>
+                                )}
+                                <tr
+                                  key={item.id}
+                                  className={"border-b border-gray-300 hover:bg-gray-50 transition-colors " + (draggingId === item.id ? 'opacity-25' : '')}
+                                  style={draggingId === item.id ? { backgroundColor: 'transparent' as any } : undefined}
+                                  draggable={true}
+                                  onDragStart={(e) => {
+                                    // ensure originalOrder exists
+                                    if (!originalOrder || originalOrder.length === 0) syncOriginalOrder((editedQuote.items || []).map(it => it.id));
+                                    e.dataTransfer.setData('text/plain', item.id);
+                                    setDraggingId(item.id);
+                                  }}
+                                  onDragEnter={(e) => {
+                                    e.preventDefault();
+                                    const draggedId = draggingId || e.dataTransfer.getData('text/plain');
+                                    if (!draggedId || draggedId === item.id) { setDropIndex(null); return; }
+                                    // perform immediate preview reorder so the row moves while dragging
+                                    syncOriginalOrder((prev: string[]) => {
+                                      const next = prev.filter(id => id !== draggedId);
+                                      const idx2 = next.indexOf(item.id);
+                                      if (idx2 === -1) return [...next, draggedId];
+                                      next.splice(idx2, 0, draggedId);
+                                      return next;
+                                    });
+                                    setDropIndex(idx);
+                                  }}
+                                  onDragOver={(e) => { e.preventDefault(); setDropIndex(idx); }}
+                                  onDrop={(e) => {
+                                    e.preventDefault();
+                                    const draggedId = e.dataTransfer.getData('text/plain');
+                                    const targetId = item.id;
+                                    if (!draggedId || draggedId === targetId) { setDropIndex(null); return; }
+                                    syncOriginalOrder((prev: string[]) => {
+                                      const next = prev.filter(id => id !== draggedId);
+                                      const idx2 = next.indexOf(targetId);
+                                      if (idx2 === -1) return [...next, draggedId];
+                                      next.splice(idx2, 0, draggedId);
+                                      return next;
+                                    });
+                                    setDraggingId(null);
+                                    setDropIndex(null);
+                                  }}
+                                  onDragEnd={() => { setDraggingId(null); setDropIndex(null); }}
+                                >
+                                <td className="px-1 py-2 text-center">
+                                  <button className="cursor-grab p-1 rounded hover:bg-gray-100" title="Arrastrar para reordenar">⋮⋮</button>
+                                </td>
+                                <td className="border-r border-gray-300 px-1 py-2 text-center font-semibold w-20">
                                   {String(item.product?.sku || item.product_id || '-')}
                                 </td>
-                                <td className="border-r border-gray-300 px-3 py-2 text-left">
-                                  <div style={{ whiteSpace: 'normal', wordBreak: 'break-word', overflowWrap: 'break-word', fontSize: '11px' }}>{item.name}</div>
+                                <td className="border-r border-gray-300 px-3 py-2 text-left w-80 align-top">
+                                  <div style={{ whiteSpace: 'normal', wordBreak: 'break-word', overflowWrap: 'break-word', fontSize: '11px' }}>
+                                    <textarea
+                                      rows={2}
+                                      className="w-full border border-gray-200 px-2 py-1 rounded text-xs font-semibold resize-none"
+                                      value={editedQuote.items?.find(it => it.id === item.id)?.name ?? item.name ?? ''}
+                                      style={{ minHeight: '48px', maxHeight: 240, overflowY: 'auto' }}
+                                      onInput={(e:any) => {
+                                        const t = e.currentTarget as HTMLTextAreaElement;
+                                        t.style.height = 'auto';
+                                        const maxH = 240; // aún mayor altura
+                                        const newH = Math.min(t.scrollHeight, maxH);
+                                        t.style.height = `${newH}px`;
+                                      }}
+                                      onChange={e => {
+                                        const newName = e.target.value;
+                                        setEditedQuote(prev => {
+                                          if (!prev) return prev;
+                                          const newItems = (prev.items || []).map(it => it.id === item.id ? ({ ...it, name: newName }) : it);
+                                          return { ...prev, items: newItems };
+                                        });
+                                      }}
+                                    />
+                                  </div>
+                                  <div className="mt-1">
+                                    <textarea
+                                      className="w-full border border-gray-200 px-2 py-1 rounded text-xs resize-none"
+                                      placeholder="Características (separadas por coma)"
+                                      value={(editedCharacteristics[item.id] ?? (Array.isArray(item.characteristics) ? item.characteristics : (typeof item.characteristics === 'string' ? (function(){ try { return JSON.parse(String(item.characteristics)) } catch { return String(item.characteristics).split(',').map(s=>s.trim()).filter(Boolean) } })() : []) )).join(', ')}
+                                      rows={2}
+                                      style={{ minHeight: '48px', maxHeight: 280, overflowY: 'auto' }}
+                                      onInput={(e:any) => { const t = e.currentTarget as HTMLTextAreaElement; t.style.height = 'auto'; t.style.height = `${Math.min(t.scrollHeight, 280)}px`; }}
+                                      onChange={e => {
+                                        const vals = String(e.target.value).split(',').map(s => s.trim()).filter(Boolean);
+                                        setEditedCharacteristics(prev => ({ ...prev, [item.id]: vals }));
+                                      }}
+                                    />
+                                  </div>
                                 </td>
                                 <td className="border-r border-gray-300 px-3 py-2 text-center">
                                   <input
                                     type="number"
-                                    className="w-full border border-gray-300 px-2 py-1 rounded text-xs text-center focus:outline-none focus:border-red-500 [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none [&]:appearance-none"
+                                    className="mx-auto w-20 border border-gray-300 px-2 py-1 rounded text-xs text-center focus:outline-none focus:border-red-500 [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none [&]:appearance-none"
                                     value={editedQuote.items?.find(it => it.id === item.id)?.qty ?? item.qty}
                                     onChange={e => {
                                       const newQty = Math.max(0, parseInt(e.target.value) || 0);
@@ -1294,16 +1873,34 @@ export default function QuotesPage() {
                                     min="1"
                                   />
                                 </td>
-                                <td className="border-r border-gray-300 px-3 py-2 text-center">
-                                  {(item.measurement_unit ?? '').replace(/^unidad\s+/i, '')}
+                                <td className="border-r border-gray-300 px-1 py-1 text-center w-12">
+                                  <select
+                                    className="mx-auto w-12 border border-gray-300 px-1 py-0.5 rounded text-xs text-center focus:outline-none focus:border-red-500"
+                                    value={editedUnits[item.id] ?? normalizeUnitKey(item.measurement_unit) ?? ''}
+                                    onChange={e => {
+                                      const newUnitKey = e.target.value;
+                                      console.log(`[onChange Unidad] Item ${item.id}: ${item.measurement_unit} -> ${newUnitKey}`);
+                                      setEditedUnits(prev => ({ ...prev, [item.id]: newUnitKey }));
+                                      setEditedQuote(prev => {
+                                        if (!prev) return prev;
+                                        const newItems = (prev.items || []).map(it => it.id === item.id ? ({ ...it, measurement_unit: newUnitKey }) : it);
+                                        return { ...prev, items: newItems };
+                                      });
+                                    }}
+                                  >
+                                    <option value="">--</option>
+                                    {Object.keys(unitLabels).map(k => (
+                                      <option key={k} value={k}>{unitLabels[k]}</option>
+                                    ))}
+                                  </select>
                                 </td>
-                                <td className="border-r border-gray-300 px-2 py-2 text-center">
+                                <td className="border-r border-gray-300 px-1 py-1 text-center w-16">
                                   <div className="flex items-center justify-center gap-1 bg-blue-50 p-2 rounded border border-blue-200">
                                     <span className="font-bold">$</span>
                                     <input
                                       type="text"
                                       className="bg-transparent outline-none text-right text-xs"
-                                      style={{ width: '70px' }}
+                                      style={{ width: '96px' }}
                                       value={formatCLP(editedPrices[item.id] ?? item.update_price ?? item.price ?? 0)}
                                       onChange={e => {
                                         const raw = e.target.value.replace(/[^\d]/g, '');
@@ -1316,18 +1913,18 @@ export default function QuotesPage() {
                                     />
                                   </div>
                                 </td>
-                                <td className="border-r border-gray-300 px-3 py-2 text-center">
+                                <td className="border-r border-gray-300 px-2 py-2 text-center w-28">
                                   <div className="flex items-center justify-center gap-1">
                                     <span className="font-bold">$</span>
                                     <span className="text-right">{formatCLP(Math.round((editedQuote.items?.find(it => it.id === item.id)?.qty ?? item.qty) * (editedPrices[item.id] ?? item.update_price ?? item.price ?? 0)))}</span>
                                   </div>
                                 </td>
                                 <td className="border-r border-gray-300 px-2 py-2 text-center">
-                                  <div className="flex items-center justify-center gap-1 bg-yellow-50 p-2 rounded border border-yellow-200">
+                                  <div className="flex items-center justify-center gap-1 bg-yellow-50 p-1 rounded border border-yellow-200">
                                     <input
                                       type="text"
                                       className="bg-transparent outline-none text-center text-xs"
-                                      style={{ width: '45px' }}
+                                      style={{ width: '36px' }}
                                       value={editedDiscounts[item.id] ?? item.discount ?? 0}
                                       onChange={e => {
                                         const raw = e.target.value.replace(/[^\d]/g, '');
@@ -1341,7 +1938,7 @@ export default function QuotesPage() {
                                     <span className="text-xs">%</span>
                                   </div>
                                 </td>
-                                <td className="px-3 py-2 text-center font-bold">
+                                <td className="border-r border-gray-300 px-2 py-2 text-center w-28">
                                   <div className="flex items-center justify-center gap-1">
                                     <span className="font-bold">$</span>
                                     <span className="text-right">{(() => {
@@ -1352,36 +1949,105 @@ export default function QuotesPage() {
                                     })()}</span>
                                   </div>
                                 </td>
-                              </tr>
+                                <td className="px-2 py-2 text-center">
+                                  <button
+                                    onClick={() => removeItemFromEditedQuote(item.id)}
+                                    className="px-2 py-1 bg-red-100 text-red-700 rounded hover:bg-red-200 transition-colors text-sm font-medium"
+                                    title="Eliminar producto"
+                                  >
+                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 inline" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                                      <polyline points="3 6 5 6 21 6"></polyline>
+                                      <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                                      <line x1="10" y1="11" x2="10" y2="17"></line>
+                                      <line x1="14" y1="11" x2="14" y2="17"></line>
+                                    </svg>
+                                  </button>
+                                </td>
+                                </tr>
+                              </Fragment>
                             );
                           })
                         : editedQuote.items?.map((item) => (
-                          <tr key={item.id} className="border-b border-gray-300 hover:bg-gray-50 transition-colors">
-                              <td className="border-r border-gray-300 px-3 py-2 text-center font-semibold">
+                          <tr
+                            key={item.id}
+                            className={"border-b border-gray-300 hover:bg-gray-50 transition-colors " + (draggingId === item.id ? 'opacity-25' : '')}
+                            style={draggingId === item.id ? { backgroundColor: 'transparent' as any } : undefined}
+                            draggable={true}
+                            onDragStart={(e) => {
+                              if (!originalOrder || originalOrder.length === 0) syncOriginalOrder((editedQuote.items || []).map(it => it.id));
+                              e.dataTransfer.setData('text/plain', item.id);
+                              setDraggingId(item.id);
+                            }}
+                            onDragEnter={(e) => {
+                              e.preventDefault();
+                              const draggedId = draggingId || e.dataTransfer.getData('text/plain');
+                              if (!draggedId || draggedId === item.id) { setDropIndex(null); return; }
+                              syncOriginalOrder((prev: string[]) => {
+                                const next = prev.filter(id => id !== draggedId);
+                                const idx2 = next.indexOf(item.id);
+                                if (idx2 === -1) return [...next, draggedId];
+                                next.splice(idx2, 0, draggedId);
+                                return next;
+                              });
+                              setDropIndex(originalOrder.indexOf(item.id));
+                            }}
+                            onDragOver={(e) => { e.preventDefault(); }}
+                            onDrop={(e) => {
+                              e.preventDefault();
+                              const draggedId = e.dataTransfer.getData('text/plain');
+                              const targetId = item.id;
+                              if (!draggedId || draggedId === targetId) return;
+                              syncOriginalOrder((prev: string[]) => {
+                                const next = prev.filter(id => id !== draggedId);
+                                const idx = next.indexOf(targetId);
+                                if (idx === -1) return [...next, draggedId];
+                                next.splice(idx, 0, draggedId);
+                                return next;
+                              });
+                              setDraggingId(null);
+                            }}
+                            onDragEnd={() => setDraggingId(null)}
+                          >
+                            <td className="px-3 py-2 text-center font-semibold">
                                 {String(item.product?.sku || item.product_id || '-')}
                               </td>
                               <td className="border-r border-gray-300 px-3 py-2 text-left">
                                 <div style={{ whiteSpace: 'normal', wordBreak: 'break-word', overflowWrap: 'break-word', fontSize: '11px' }}>{item.name}</div>
+                                <div className="mt-1">
+                                  <input
+                                    type="text"
+                                    className="w-full max-w-[520px] border border-gray-200 px-2 py-1 rounded text-xs"
+                                    placeholder="Características (separadas por coma)"
+                                    value={(editedCharacteristics[item.id] ?? (Array.isArray(item.characteristics) ? item.characteristics : (typeof item.characteristics === 'string' ? (function(){ try { return JSON.parse(String(item.characteristics)) } catch { return String(item.characteristics).split(',').map(s=>s.trim()).filter(Boolean) } })() : []) )).join(', ')}
+                                    onChange={e => {
+                                      const vals = String(e.target.value).split(',').map(s => s.trim()).filter(Boolean);
+                                      setEditedCharacteristics(prev => ({ ...prev, [item.id]: vals }));
+                                    }}
+                                  />
+                                </div>
                               </td>
-                              <td className="border-r border-gray-300 px-3 py-2 text-center">
-                                <input
-                                  type="number"
-                                  className="w-full border border-gray-300 px-2 py-1 rounded text-xs text-center focus:outline-none focus:border-red-500 [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none [&]:appearance-none"
-                                  value={item.qty}
-                                  onChange={e => {
-                                    const newQty = Math.max(0, parseInt(e.target.value) || 0);
-                                    setEditedQuote(prev => {
-                                      if (!prev) return prev;
-                                      const newItems = (prev.items || []).map(it => it.id === item.id ? ({ ...it, qty: newQty }) : it);
-                                      return { ...prev, items: newItems };
-                                    });
-                                    setEditedQtys(prev => ({ ...prev, [item.id]: newQty }));
-                                  }}
-                                  min="1"
-                                />
-                              </td>
+                                <td className="border-r border-gray-300 px-3 py-2 text-center">
+                                  <input
+                                    type="number"
+                                    className="mx-auto w-20 border border-gray-300 px-2 py-1 rounded text-xs text-center focus:outline-none focus:border-red-500 [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none [&]:appearance-none"
+                                    value={item.qty}
+                                    onChange={e => {
+                                      const newQty = Math.max(0, parseInt(e.target.value) || 0);
+                                      setEditedQuote(prev => {
+                                        if (!prev) return prev;
+                                        const newItems = (prev.items || []).map(it => it.id === item.id ? ({ ...it, qty: newQty }) : it);
+                                        return { ...prev, items: newItems };
+                                      });
+                                      setEditedQtys(prev => ({ ...prev, [item.id]: newQty }));
+                                    }}
+                                    min="1"
+                                  />
+                                </td>
                               <td className="border-r border-gray-300 px-3 py-2 text-center text-xs">
-                                {(item.measurement_unit ?? '').replace(/^unidad\s+/i, '')}
+                                {(() => {
+                                  const key = normalizeUnitKey(item.measurement_unit);
+                                  return unitLabels[key] ?? (item.measurement_unit ?? '').replace(/^unidad\s+/i, '');
+                                })()}
                               </td>
                               <td className="border-r border-gray-300 px-3 py-2 text-center">
                                 <div className="flex items-center justify-center gap-1">
@@ -1406,8 +2072,29 @@ export default function QuotesPage() {
                                   <span className="text-right text-xs">{formatCLP(Math.round((editedPrices[item.id] ?? item.update_price ?? item.price ?? 0) * item.qty))}</span>
                                 </div>
                               </td>
+                              <td className="px-3 py-2 text-center">
+                                <button
+                                  onClick={() => removeItemFromEditedQuote(item.id)}
+                                  className="px-2 py-1 bg-red-100 text-red-700 rounded hover:bg-red-200 transition-colors text-sm font-medium"
+                                  title="Eliminar producto"
+                                >
+                                  <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 inline" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                                    <polyline points="3 6 5 6 21 6"></polyline>
+                                    <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                                    <line x1="10" y1="11" x2="10" y2="17"></line>
+                                    <line x1="14" y1="11" x2="14" y2="17"></line>
+                                  </svg>
+                                </button>
+                              </td>
                             </tr>
                           ))}
+                    {dropIndex === originalOrder.length && draggingId && originalOrder.length > 0 && editedQuote.items && (
+                      <tr key="placeholder-end" className="h-4">
+                        <td colSpan={12} className="px-2 py-1">
+                          <div className="w-full h-1 bg-red-400 rounded" />
+                        </td>
+                      </tr>
+                    )}
                   </tbody>
                 </table>
                 </div>
@@ -1415,8 +2102,20 @@ export default function QuotesPage() {
 
               {/* Buttons section */}
               <div className="flex justify-end gap-4 pt-4 mt-5 border-t border-gray-200">
-                <button className="px-6 py-2 bg-gray-300 text-gray-700 rounded-lg hover:bg-gray-400 font-medium text-sm transition-colors" onClick={() => setShowModal(false)}>Cancelar</button>
-                <button className="px-8 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 font-medium text-sm transition-colors shadow-md" onClick={handleSavePrices}>Guardar cambios</button>
+                <button className="px-6 py-2 bg-gray-300 text-gray-700 rounded-lg hover:bg-gray-400 font-medium text-sm transition-colors" onClick={() => {
+                  setShowModal(false);
+                  setEditedPrices({});
+                  setEditedQtys({});
+                  setEditedDiscounts({});
+                  setEditedUnits({});
+                  setEditedCharacteristics({});
+                  setEditModalProductSearchQuery('');
+                  setEditModalProductSearchResults([]);
+                  setEditModalShowMatches(false);
+                  setEditedQuote(null);
+                  setSelectedQuote(null);
+                }}>Cancelar</button>
+                <button className="px-8 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 font-medium text-sm transition-colors shadow-md disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2" onClick={handleSavePrices} disabled={savingModalChanges}>{savingModalChanges ? <><Loader className="w-4 h-4 animate-spin" /> Guardando...</> : 'Guardar cambios'}</button>
               </div>
 
               
@@ -2590,7 +3289,7 @@ export default function QuotesPage() {
                     </div>
                     <div className="p-1 border border-gray-300 rounded bg-white">
                       <div className="text-xs font-semibold text-gray-400 uppercase">Ejecución</div>
-                      <div className="text-xs text-gray-900 text-center">{q.execution_time ?? '-'}</div>
+                      <div className="text-xs text-gray-900 text-center">{q.execution_time ? String(q.execution_time).replace(/\|/g, ' / ') : '-'}</div>
                     </div>
                     <div className="p-1 border border-gray-300 rounded bg-white">
                       <div className="text-xs font-semibold text-gray-400 uppercase">Forma Pago</div>
@@ -2638,8 +3337,25 @@ export default function QuotesPage() {
                       setEditedPrices(prices);
                       setEditedQtys(qtys);
                       setEditedDiscounts(discounts);
+                      const units: Record<string, string> = {};
+                      const chars: Record<string, string[]> = {};
+                      (q.items || []).forEach(it => {
+                        const src = (it as any).measurement_unit ?? (it as any).unit_measure ?? (it as any).measurementUnit ?? (it.product?.measurement_unit ?? '');
+                        units[it.id] = normalizeUnitKey(src);
+                        // normalize characteristics: prefer item.characteristics, fallback to product.characteristics
+                        let c: any = (it as any).characteristics ?? (it.product && (it.product.characteristics ?? null)) ?? null;
+                        if (typeof c === 'string') {
+                          try { c = JSON.parse(c); } catch { c = c.split(',').map((s:string)=>s.trim()).filter(Boolean); }
+                        }
+                        if (!Array.isArray(c)) c = [];
+                        chars[it.id] = c;
+                      });
+                      setEditedUnits(units);
+                      setEditedCharacteristics(chars);
                       setShowModal(true);
-                      setOriginalOrder(q.items ? q.items.map(item => item.id) : []);
+                      // Use the current items order from `q.items` so reopening respects last known order
+                      const ordered = (q.items || []).map((item:any) => item.id);
+                      syncOriginalOrder(ordered);
                     }}>Editar cotización</button>
                     <button
                       disabled={sending}
@@ -2722,61 +3438,56 @@ export default function QuotesPage() {
                   <tbody>
                     {q.items && q.items.length > 0 ? (
                       q.items.map((item) => {
-                        const product: Product = item.product ?? {
-                          id: 0,
-                          name: '',
-                          image_url: '',
-                          unit_size: '',
-                          measurement_unit: '',
-                          price: undefined,
-                          characteristics: [],
-                          description: '',
-                          manufacturer: '',
-                        };
-                        let characteristics: string[] = [];
-                        if (Array.isArray(product.characteristics)) {
-                          characteristics = product.characteristics;
-                        } else if (typeof product.characteristics === 'string') {
-                          try {
-                            characteristics = JSON.parse(product.characteristics);
-                          } catch {}
+                        // Prefer data from the quote item (fasercon_quote_items)
+                        const itemImage = item.image_url ?? item.product?.image_url ?? null;
+                        const itemName = item.name ?? item.product?.name ?? '';
+                        let itemCharacteristics: string[] = [];
+                        if (Array.isArray(item.characteristics)) itemCharacteristics = item.characteristics;
+                        else if (typeof item.characteristics === 'string') {
+                          try { itemCharacteristics = JSON.parse(item.characteristics); } catch { itemCharacteristics = String(item.characteristics).split(',').map((s:string)=>s.trim()).filter(Boolean); }
+                        } else if (item.product) {
+                          const pchars = item.product.characteristics;
+                          if (Array.isArray(pchars)) itemCharacteristics = pchars;
+                          else if (typeof pchars === 'string') {
+                            try { itemCharacteristics = JSON.parse(pchars); } catch { itemCharacteristics = String(pchars).split(',').map((s:string)=>s.trim()).filter(Boolean); }
+                          }
                         }
-                        // Calcular valor unitario y precio total (qty * update_price cuando exista)
-                        const perUnit = typeof item.update_price === 'number' ? item.update_price : (typeof product.price === 'number' ? product.price : item.price);
-                        const priceTotal = (typeof item.update_price === 'number' && typeof item.qty === 'number')
-                          ? Math.round(item.update_price * item.qty)
-                          : (typeof perUnit === 'number' && typeof item.qty === 'number' ? Math.round(perUnit * item.qty) : null);
-                        // Calcular descuento y subtotal: subtotal = priceTotal - (priceTotal * discount/100)
+
+                        const perUnit = typeof item.update_price === 'number' ? item.update_price : (typeof item.price === 'number' ? item.price : (item.product?.price ?? null));
+                        const priceTotal = (typeof perUnit === 'number' && typeof item.qty === 'number') ? Math.round(perUnit * item.qty) : null;
                         const discountPercent = typeof item.discount === 'number' ? item.discount : 0;
                         const discountAmount = priceTotal !== null ? Math.round(priceTotal * (discountPercent / 100)) : 0;
                         const subtotal = priceTotal !== null ? (priceTotal - discountAmount) : 0;
+
                         return (
                           <tr key={item.id} className="border-b">
                               <td className="px-1 py-0.5 truncate">
-                                <span title={product.id?.toString()}>
-                                  {product.id !== undefined && product.id !== null
-                                    ? product.id.toString().split('-')[0]
-                                    : ''}
+                                <span title={String(item.product_id ?? item.product?.id ?? '')}>
+                                  {String(item.product_id ?? item.product?.id ?? '').split('-')[0]}
                                 </span>
                               </td>
                               <td className="px-1 py-0.5" style={{ maxWidth: '640px' }}>
-                                <div style={{ whiteSpace: 'normal', wordBreak: 'break-word', overflowWrap: 'break-word' }}>{product.name ?? item.name}</div>
+                                <div style={{ whiteSpace: 'normal', wordBreak: 'break-word', overflowWrap: 'break-word' }}>{itemName}</div>
                               </td>
                               <td className="px-1 py-0.5">
-                              {product.image_url ? (
+                              {itemImage ? (
                                 <div className="relative w-10 h-10">
-                                  <Image src={Array.isArray(product.image_url) ? product.image_url[0] as string : (product.image_url as string)} alt={product.name || ''} fill className="object-contain rounded border" sizes="40px" />
+                                  <Image src={Array.isArray(itemImage) ? itemImage[0] as string : (itemImage as string)} alt={itemName || ''} fill className="object-contain rounded border" sizes="40px" />
                                 </div>
                               ) : (
                                 <span className="text-gray-400">-</span>
                               )}
                             </td>
                               <td className="px-1 py-0.5 text-center">{item.qty}</td>
-                              <td className="px-1 py-0.5 text-center">{(product.measurement_unit ?? item.measurement_unit ?? '').replace(/^unidad\s+/i, '')}</td>
+                              <td className="px-1 py-0.5 text-center">{(() => {
+                                  const source = item.measurement_unit ?? item.product?.measurement_unit ?? '';
+                                  const key = normalizeUnitKey(source);
+                                  return unitLabels[key] ?? String(source).replace(/^unidad\s+/i, '');
+                                })()}</td>
                               <td className="px-1 py-0.5 truncate">
-                              {characteristics.length > 0 ? (
+                              {itemCharacteristics.length > 0 ? (
                                   <div className="flex flex-wrap gap-1 overflow-hidden">
-                                  {characteristics.map((c, idx) => (
+                                  {itemCharacteristics.map((c, idx) => (
                                       <span key={idx} className="inline-block bg-gray-100 border border-gray-300 rounded-full px-2 py-0.5 text-[10px] text-gray-700">
                                       {c}
                                     </span>
@@ -2787,11 +3498,10 @@ export default function QuotesPage() {
                               )}
                             </td>
                               <td className="px-2 py-1" style={{ maxWidth: '180px' }}>
-                                <div style={{ whiteSpace: 'normal', wordBreak: 'break-word', overflowWrap: 'break-word' }} title={product.description ?? ''}>
-                                  {product.description ?? '-'}
+                                <div style={{ whiteSpace: 'normal', wordBreak: 'break-word', overflowWrap: 'break-word' }} title={item.description ?? ''}>
+                                  {item.description ?? '-'}
                                 </div>
                               </td>
-                              {/* <td className="px-2 py-1 truncate">{product.manufacturer ?? '-'}</td> */}
                               <td className="px-1 py-0.5 text-center">{typeof perUnit === 'number' ? `$${formatCLP(perUnit)}` : '-'}</td>
                               <td className="px-1 py-0.5 text-center">{priceTotal !== null ? `$${formatCLP(priceTotal)}` : '-'}</td>
                               <td className="px-1 py-0.5 text-center">{item.discount ? `${item.discount}%` : '-'}</td>
@@ -2804,6 +3514,56 @@ export default function QuotesPage() {
                     )}
                   </tbody>
                 </table>
+              </div>
+
+              {/* Resumen de totales (mostrar debajo de la tabla en la vista principal) */}
+              <div className="flex justify-end mt-4">
+                {(() => {
+                  const netoSinDescuento = (q.items || []).reduce((acc: number, item: any) => {
+                    const perUnit = typeof item.update_price === 'number' ? item.update_price : (typeof item.price === 'number' ? item.price : (item.product?.price ?? 0));
+                    const qty = Number(item.qty) || 0;
+                    return acc + (perUnit * qty);
+                  }, 0);
+                  const netoConDescuento = (q.items || []).reduce((acc: number, item: any) => {
+                    const perUnit = typeof item.update_price === 'number' ? item.update_price : (typeof item.price === 'number' ? item.price : (item.product?.price ?? 0));
+                    const qty = Number(item.qty) || 0;
+                    const discount = typeof item.discount === 'number' ? item.discount : 0;
+                    const priceTotal = perUnit * qty;
+                    const discounted = Math.round(priceTotal - (priceTotal * (discount / 100)));
+                    return acc + discounted;
+                  }, 0);
+                  const descuentoTotal = Math.round(netoSinDescuento - netoConDescuento);
+                  const iva = Math.round(netoConDescuento * 0.19);
+                  const total = netoConDescuento + iva;
+                  return (
+                    <div style={{ border: '1px solid #e5e7eb', minWidth: '340px', background: '#fff', marginLeft: '-40px' }}>
+                      <table style={{ width: '100%' }}>
+                        <tbody>
+                          <tr>
+                            <td style={{ fontWeight: 'normal', padding: '6px 0 4px 12px', fontSize: '0.85rem' }}>Total Neto Sin Descuento:</td>
+                            <td style={{ textAlign: 'right', fontWeight: 'normal', padding: '6px 12px 4px 0', fontSize: '0.85rem' }}>$ {formatCLP(netoSinDescuento)}</td>
+                          </tr>
+                          <tr>
+                            <td style={{ fontWeight: 'normal', padding: '4px 0 4px 12px', fontSize: '0.85rem' }}>Descuento:</td>
+                            <td style={{ textAlign: 'right', fontWeight: 'normal', padding: '4px 12px 4px 0', fontSize: '0.85rem' }}>$ {formatCLP(descuentoTotal)}</td>
+                          </tr>
+                          <tr style={{ background: '#fafafa' }}>
+                            <td style={{ fontWeight: 'normal', padding: '4px 0 4px 12px', fontSize: '0.85rem' }}>Total Neto:</td>
+                            <td style={{ textAlign: 'right', fontWeight: 'normal', padding: '4px 12px 4px 0', fontSize: '0.85rem' }}>$ {formatCLP(netoConDescuento)}</td>
+                          </tr>
+                          <tr>
+                            <td style={{ fontWeight: 'normal', padding: '4px 0 4px 12px', fontSize: '0.85rem' }}>IVA (19%):</td>
+                            <td style={{ textAlign: 'right', fontWeight: 'normal', padding: '4px 12px 4px 0', fontSize: '0.85rem' }}>$ {formatCLP(iva)}</td>
+                          </tr>
+                          <tr>
+                            <td style={{ fontWeight: 'bold', padding: '6px 0 8px 12px', fontSize: '0.95rem', color: '#a62626' }}>TOTAL:</td>
+                            <td style={{ textAlign: 'right', fontWeight: 'bold', padding: '6px 12px 8px 0', fontSize: '0.95rem', color: '#a62626' }}>$ {formatCLP(total)}</td>
+                          </tr>
+                        </tbody>
+                      </table>
+                    </div>
+                  );
+                })()}
               </div>
                 </>
               )}

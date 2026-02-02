@@ -1,6 +1,7 @@
 "use client";
 import React, { useEffect, useState } from "react";
 import Image from 'next/image'
+import { useSession } from "next-auth/react";
 import { supabase } from "@/lib/supabase";
 import type { Service } from "@/types/service";
 import type { QuoteService } from "@/types/quoteService";
@@ -8,6 +9,7 @@ import ServiceForm from "./ServiceForm";
 import QuoteServiceCreator from "./QuoteServiceCreator";
 
 export default function DashboardServicesPage() {
+  const { data: session } = useSession();
   const [services, setServices] = useState<Service[]>([]);
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState<Service | null>(null);
@@ -17,29 +19,42 @@ export default function DashboardServicesPage() {
   const [showQuoteForm, setShowQuoteForm] = useState(false);
   const [quoteServices, setQuoteServices] = useState<QuoteService[]>([]);
   const [quoteEditing, setQuoteEditing] = useState<QuoteService | null>(null);
+  const [quoteSearchQuery, setQuoteSearchQuery] = useState('');
+  const [debouncedQuoteSearch, setDebouncedQuoteSearch] = useState('');
+
+  const company = session?.user?.company || 'fasercon';
 
   async function fetchServices() {
     setLoading(true);
     setError(null);
-    const { data, error } = await supabase
-      .from("fasercon_services")
-      .select("*")
-      .order("created_at", { ascending: true });
-    if (error) setError(error.message);
-    setServices(data || []);
+    // Note: This endpoint doesn't exist in the API, so we'll keep using direct Supabase query for now
+    // In production, consider creating a GET endpoint at /api/services
+    try {
+      const response = await fetch(`/api/services?company=${company}`);
+      if (response.ok) {
+        const data = await response.json();
+        setServices(data.data || []);
+      } else {
+        setError('Error al cargar servicios');
+      }
+    } catch (err) {
+      setError('Error al cargar servicios');
+    }
     setLoading(false);
   }
 
   async function fetchQuoteServices() {
-    const { data, error } = await supabase
-      .from('fasercon_quote_services')
-      .select('*')
-      .order('created_at', { ascending: true });
-    if (error) {
-      console.error('Error fetching quote services', error.message);
-      return;
+    try {
+      const response = await fetch(`/api/quote-services?company=${company}`);
+      if (response.ok) {
+        const data = await response.json();
+        setQuoteServices(data.services || []);
+      } else {
+        console.error('Error fetching quote services');
+      }
+    } catch (err) {
+      console.error('Error fetching quote services:', err);
     }
-    setQuoteServices(data || []);
   }
 
   useEffect(() => {
@@ -47,11 +62,23 @@ export default function DashboardServicesPage() {
     fetchQuoteServices();
   }, []);
 
+  // debounce search input
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedQuoteSearch(quoteSearchQuery.trim()), 300);
+    return () => clearTimeout(t);
+  }, [quoteSearchQuery]);
+
+  const displayedQuoteServices = React.useMemo(() => {
+    const q = String(debouncedQuoteSearch || '').toLowerCase();
+    if (!q || q.length < 3) return quoteServices;
+    return quoteServices.filter(item => JSON.stringify(item).toLowerCase().includes(q));
+  }, [quoteServices, debouncedQuoteSearch]);
+
   async function handleSave(service: Service) {
     setError(null);
     try {
       const method = service.id ? 'PUT' : 'POST';
-      const res = await fetch('/api/services', {
+      const res = await fetch(`/api/services?company=${company}`, {
         method,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(service),
@@ -238,7 +265,7 @@ export default function DashboardServicesPage() {
                     if (service.id) {
                       // update
                       const { error } = await supabase
-                        .from('fasercon_quote_services')
+                        .from(`${company}_quote_services`)
                         .update({
                           sku: service.sku || null,
                           title: service.title,
@@ -260,7 +287,7 @@ export default function DashboardServicesPage() {
                     } else {
                       // insert
                       const { error } = await supabase
-                        .from('fasercon_quote_services')
+                        .from(`${company}_quote_services`)
                         .insert([{
                           sku: service.sku || null,
                           title: service.title,
@@ -294,11 +321,22 @@ export default function DashboardServicesPage() {
 
           {!showQuoteForm && (
             <div>
-              {quoteServices.length === 0 ? (
-                <div className="text-gray-600">No hay servicios de cotización aún.</div>
+              <div className="mb-4">
+                <input
+                  type="text"
+                  placeholder="Buscar servicios de cotización (mín. 3 caracteres)..."
+                  value={quoteSearchQuery}
+                  onChange={(e) => setQuoteSearchQuery(e.target.value)}
+                  className="w-full border border-gray-300 px-3 py-2 rounded text-sm focus:outline-none focus:border-blue-500"
+                />
+                <div className="text-xs text-gray-500 mt-1">Ingrese 3 caracteres para iniciar la búsqueda.</div>
+              </div>
+
+              {displayedQuoteServices.length === 0 ? (
+                <div className="text-gray-600">No hay servicios de cotización que coincidan.</div>
               ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {quoteServices.map(q => (
+                  {displayedQuoteServices.map(q => (
                     <div key={q.id} className="border rounded p-4 flex flex-col gap-3">
                       <div className="flex items-start justify-between">
                         <div>
@@ -319,7 +357,7 @@ export default function DashboardServicesPage() {
                           }} aria-label={`Editar ${q.title}`}>Editar</button>
                           <button className="bg-gray-200 px-3 py-2 rounded" onClick={async () => {
                             if (!confirm('Eliminar este servicio de cotización?')) return;
-                            const { error } = await supabase.from('fasercon_quote_services').delete().eq('id', q.id);
+                            const { error } = await supabase.from(`${company}_quote_services`).delete().eq('id', q.id);
                             if (error) return alert(error.message || 'Error eliminando');
                             fetchQuoteServices();
                           }} aria-label={`Eliminar ${q.title}`}>Eliminar</button>

@@ -30,6 +30,7 @@ function interpretMeasurementUnit(unit: string | null | undefined) {
     cm: 'cm',
     mm: 'mm',
     m: 'm',
+    m_lin: 'm',
     kg: 'kg',
     g: 'g',
     lb: 'lb',

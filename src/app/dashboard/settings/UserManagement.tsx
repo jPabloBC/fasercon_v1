@@ -172,7 +172,7 @@ export default function UserManagement() {
           className="w-full md:w-64 border border-gray-300 p-2 rounded"
         >
           <option value="fasercon">Fasercon</option>
-          <option value="rym">RYM Aceros</option>
+          <option value="rym">RyM</option>
           <option value="vimal">Vimal</option>
         </select>
       </div>

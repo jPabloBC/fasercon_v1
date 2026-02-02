@@ -25,9 +25,18 @@ function decimalToFraction(decimal: number) {
   return `${numerator}/${denominator}`
 }
 
-// Usamos la tabla `fasercon_products` según la convención del proyecto
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
+  const company = searchParams.get('company') || 'fasercon';
+
+  // Validar empresa
+  if (!['fasercon', 'rym', 'vimal'].includes(company)) {
+    return NextResponse.json({ error: 'Empresa inválida' }, { status: 400 });
+  }
+
+  const TABLE_PRODUCTS = `${company}_products`;
+  const TABLE_SUPPLIERS = `${company}_suppliers`;
+
   const sku = searchParams.get('sku');
   const name = searchParams.get('name');
   const q = searchParams.get('q');
@@ -55,7 +64,7 @@ export async function GET(request: NextRequest) {
 
         // Query 1: Search text fields
         const { data: textResults, error: textError } = await supabaseAdmin
-          .from('fasercon_products')
+          .from(TABLE_PRODUCTS)
           .select('*')
           .or(orExpr)
           .order('order', { ascending: true })
@@ -72,7 +81,7 @@ export async function GET(request: NextRequest) {
         const looksLikeUuidPart = /^[0-9a-f-]+$/i.test(q.trim());
         if (looksLikeUuidPart) {
           const { data: allProducts } = await supabaseAdmin
-            .from('fasercon_products')
+            .from(TABLE_PRODUCTS)
             .select('id, name, sku, description, image_url, price, unit_size, measurement_unit, manufacturer, characteristics, order')
             .limit(5000);
           
@@ -119,7 +128,7 @@ export async function GET(request: NextRequest) {
         return NextResponse.json({ products })
       }
 
-      const query = supabaseAdmin.from('fasercon_products').select('*')
+      const query = supabaseAdmin.from(TABLE_PRODUCTS).select('*')
 
       if (sku) {
         query.eq('sku', sku)
@@ -159,7 +168,7 @@ export async function GET(request: NextRequest) {
     } else {
       // Fetch all products
       const { data, error } = await supabaseAdmin
-        .from('fasercon_products')
+        .from(TABLE_PRODUCTS)
         .select('*')
         .order('order', { ascending: true })
 
@@ -192,6 +201,17 @@ export async function GET(request: NextRequest) {
 
 export async function PATCH(request: NextRequest) {
   try {
+    const { searchParams } = new URL(request.url);
+    const company = searchParams.get('company') || 'fasercon';
+
+    // Validar empresa
+    if (!['fasercon', 'rym', 'vimal'].includes(company)) {
+      return NextResponse.json({ error: 'Empresa inválida' }, { status: 400 });
+    }
+
+    const TABLE_PRODUCTS = `${company}_products`;
+    const TABLE_SUPPLIERS = `${company}_suppliers`;
+
     const body = await request.json()
     const { id, ...updates } = body
     if (!id) return NextResponse.json({ error: 'Missing product id' }, { status: 400 })
@@ -214,7 +234,7 @@ export async function PATCH(request: NextRequest) {
       try {
         const minOrder = Number(updates.order || 0)
         const { data: rows, error: selErr } = await supabaseAdmin
-          .from('fasercon_products')
+          .from(TABLE_PRODUCTS)
           .select('id, order')
           .gte('order', minOrder)
           .neq('id', id)
@@ -224,7 +244,7 @@ export async function PATCH(request: NextRequest) {
           // rows contain { id, order }
           for (const r of rows as Array<{ id: string; order?: number | null }>) {
             const current = r.order ?? 0
-            await supabaseAdmin.from('fasercon_products').update({ order: current + 1 }).eq('id', r.id)
+            await supabaseAdmin.from(TABLE_PRODUCTS).update({ order: current + 1 }).eq('id', r.id)
           }
         }
       } catch (e) {
@@ -236,7 +256,7 @@ export async function PATCH(request: NextRequest) {
   let manufacturerSkipped = false
   if (updates.manufacturer !== undefined) {
     try {
-      const { error: testErr } = await supabaseAdmin.from('fasercon_products').select('manufacturer').limit(1)
+      const { error: testErr } = await supabaseAdmin.from(TABLE_PRODUCTS).select('manufacturer').limit(1)
       if (testErr) {
         // column likely doesn't exist in this DB/schema
         console.warn('Manufacturer column not present, skipping manufacturer update', testErr)
@@ -265,7 +285,7 @@ export async function PATCH(request: NextRequest) {
           const num = Math.floor(100000 + Math.random() * 900000) // 6-digit
           const candidate = String(num)
           const { data: existing, error: selErr } = await supabaseAdmin
-            .from('fasercon_products')
+            .from(TABLE_PRODUCTS)
             .select('id')
             .eq('sku', candidate)
             .limit(1)
@@ -301,12 +321,12 @@ export async function PATCH(request: NextRequest) {
         if (!supplierName) toUpdate.supplier_id = null
         else {
           // try find existing by name
-          const { data: foundByName, error: findErr } = await supabaseAdmin.from('fasercon_suppliers').select('id').ilike('name', supplierName).limit(1)
+          const { data: foundByName, error: findErr } = await supabaseAdmin.from(TABLE_SUPPLIERS).select('id').ilike('name', supplierName).limit(1)
           if (!findErr && foundByName && foundByName.length) {
             toUpdate.supplier_id = foundByName[0].id
           } else {
             // create new supplier with given name
-            const { data: created, error: createErr } = await supabaseAdmin.from('fasercon_suppliers').insert([{ name: supplierName }]).select().single()
+            const { data: created, error: createErr } = await supabaseAdmin.from(TABLE_SUPPLIERS).insert([{ name: supplierName }]).select().single()
             if (!createErr && created) toUpdate.supplier_id = created.id
           }
         }
@@ -317,7 +337,7 @@ export async function PATCH(request: NextRequest) {
     if (toUpdate.manufacturer === '') toUpdate.manufacturer = null
 
     const { data, error } = await supabaseAdmin
-      .from('fasercon_products')
+      .from(TABLE_PRODUCTS)
       .update(toUpdate)
       .eq('id', id)
       .select()
@@ -342,6 +362,17 @@ export async function PATCH(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
+    const { searchParams } = new URL(request.url);
+    const company = searchParams.get('company') || 'fasercon';
+
+    // Validar empresa
+    if (!['fasercon', 'rym', 'vimal'].includes(company)) {
+      return NextResponse.json({ error: 'Empresa inválida' }, { status: 400 });
+    }
+
+    const TABLE_PRODUCTS = `${company}_products`;
+    const TABLE_SUPPLIERS = `${company}_suppliers`;
+
     const body = await request.json();
 
     // Validation logic
@@ -393,7 +424,7 @@ export async function POST(request: NextRequest) {
         const num = Math.floor(100000 + Math.random() * 900000); // 6-digit
         const candidate = String(num);
         const { data: existing, error: selErr } = await supabaseAdmin
-          .from('fasercon_products')
+          .from(TABLE_PRODUCTS)
           .select('id')
           .eq('sku', candidate)
           .limit(1);
@@ -424,7 +455,7 @@ export async function POST(request: NextRequest) {
     if (skuToUse) {
       try {
         const { data: existingSku, error: skuErr } = await supabaseAdmin
-          .from('fasercon_products')
+          .from(TABLE_PRODUCTS)
           .select('id')
           .eq('sku', skuToUse)
           .limit(1);
@@ -442,7 +473,7 @@ export async function POST(request: NextRequest) {
       try {
         const minOrder = Number(body.order || 0);
         const { data: rows, error: selErr } = await supabaseAdmin
-          .from('fasercon_products')
+          .from(TABLE_PRODUCTS)
           .select('id, order')
           .gte('order', minOrder)
           .order('order', { ascending: false });
@@ -450,7 +481,7 @@ export async function POST(request: NextRequest) {
         if (!selErr && Array.isArray(rows)) {
           for (const r of rows as Array<{ id: string; order?: number | null }>) {
             const current = r.order ?? 0;
-            await supabaseAdmin.from('fasercon_products').update({ order: current + 1 }).eq('id', r.id);
+            await supabaseAdmin.from(TABLE_PRODUCTS).update({ order: current + 1 }).eq('id', r.id);
           }
         }
       } catch (e) {
@@ -486,7 +517,7 @@ export async function POST(request: NextRequest) {
       } else if (typeof body.supplier === 'string') {
         const supplierName = String(body.supplier).trim();
         const { data: found, error: findErr } = await supabaseAdmin
-          .from('fasercon_suppliers')
+          .from(TABLE_SUPPLIERS)
           .select('*')
           .ilike('name', supplierName)
           .limit(1);
@@ -495,7 +526,7 @@ export async function POST(request: NextRequest) {
           insertObj.supplier_id = found[0].id;
         } else {
           const { data: created, error: createErr } = await supabaseAdmin
-            .from('fasercon_suppliers')
+            .from(TABLE_SUPPLIERS)
             .insert([{ name: supplierName }])
             .select()
             .single();
@@ -508,7 +539,7 @@ export async function POST(request: NextRequest) {
         let found = null;
         if (s.email) {
           const { data: byEmail } = await supabaseAdmin
-            .from('fasercon_suppliers')
+            .from(TABLE_SUPPLIERS)
             .select('*')
             .ilike('email', String(s.email))
             .limit(1);
@@ -516,7 +547,7 @@ export async function POST(request: NextRequest) {
         }
         if (!found && supplierName) {
           const { data: byName } = await supabaseAdmin
-            .from('fasercon_suppliers')
+            .from(TABLE_SUPPLIERS)
             .select('*')
             .ilike('name', supplierName)
             .limit(1);
@@ -529,7 +560,7 @@ export async function POST(request: NextRequest) {
           if (s.address) insertSupplier.address = s.address;
           if (s.country) insertSupplier.country = s.country;
           const { data: created, error: createErr } = await supabaseAdmin
-            .from('fasercon_suppliers')
+            .from(TABLE_SUPPLIERS)
             .insert([insertSupplier])
             .select()
             .single();
@@ -539,7 +570,7 @@ export async function POST(request: NextRequest) {
     }
 
     const { data, error } = await supabaseAdmin
-      .from('fasercon_products')
+      .from(TABLE_PRODUCTS)
       .insert([insertObj])
       .select()
       .single();

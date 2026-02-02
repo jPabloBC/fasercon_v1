@@ -80,6 +80,71 @@ export async function generateQuotePDF({
   const darkGray = rgb(0.18, 0.18, 0.18);
   const lightGray = rgb(0.95, 0.95, 0.95);
 
+  // Embedded assets for header (filled during initial header embed)
+  let embeddedLogoImage: any = null;
+  let infoTextFont: any = null;
+
+  // Helper: dibuja el footer en la página pasada como parámetro
+  const drawFooter = (p: any) => {
+    p.drawRectangle({
+      x: 0,
+      y: 0,
+      width: width,
+      height: 30,
+      color: primaryRed,
+    });
+
+    const footerText = 'Web: fasercon.cl   -   Tel: +56 9 9868 0862   -   Email: ventas@fasercon.cl';
+    const footerTextSize = 9;
+    const footerTextWidth = fontRegular.widthOfTextAtSize(footerText, footerTextSize);
+    p.drawText(footerText, {
+      x: (width - footerTextWidth) / 2,
+      y: 15,
+      size: footerTextSize,
+      font: fontRegular,
+      color: rgb(1, 1, 1),
+    });
+
+    // Añadir enlace clickable a 'fasercon.cl' en el footer
+    const footerLinkText = 'Web: fasercon.cl';
+    const footerLinkWidth = fontRegular.widthOfTextAtSize(footerLinkText, 8);
+    const linkX = (width - footerTextWidth) / 2 + footerText.indexOf('fasercon.cl') * 4.5;
+    const linkY = 15;
+    const linkRect = [
+      linkX - 2,
+      linkY - 2,
+      linkX + footerLinkWidth + 2,
+      linkY + 8,
+    ];
+    const linkAction = pdfDoc.context.obj({
+      Type: PDFName.of('Action'),
+      S: PDFName.of('URI'),
+      URI: 'https://fasercon.cl',
+    });
+    const linkAnnot = pdfDoc.context.obj({
+      Type: PDFName.of('Annot'),
+      Subtype: PDFName.of('Link'),
+      Rect: pdfDoc.context.obj(linkRect),
+      Border: pdfDoc.context.obj([0, 0, 0]),
+      A: linkAction,
+    });
+    const linkRef = pdfDoc.context.register(linkAnnot);
+    (p.node as any).normalize();
+    const annotsKey = PDFName.of('Annots');
+    let annots = p.node.lookup(annotsKey);
+    if (!annots) {
+      annots = pdfDoc.context.obj([]);
+      p.node.set(annotsKey, annots);
+    }
+    if (Array.isArray(annots)) {
+      annots.push(linkRef);
+    } else if (typeof annots === 'object' && 'push' in annots) {
+      (annots as any).push(linkRef);
+    } else {
+      console.error('Could not add annotation to the page: Annots is not an array.');
+    }
+  };
+
   // ============= HEADER (gris claro) =============
   // Header aún más pequeño: solo contiene el logo
   const headerHeight = 90 // más alto para mostrar el logo más grande
@@ -95,17 +160,17 @@ export async function generateQuotePDF({
   try {
     const logoPath = path.join(process.cwd(), 'public/assets/images/fasercon_logo2.png');
     const logoBytes = fs.readFileSync(logoPath);
-    const logoImage = await pdfDoc.embedPng(logoBytes);
+    embeddedLogoImage = await pdfDoc.embedPng(logoBytes);
     // Preservar aspect ratio: calcular tamaño que encaje en el maxWidth/maxHeight
     const maxLogoWidth = 120 * 1.5; // 30% más grande
     const maxLogoHeight = 36 * 1.5; // 30% más grande
-    const imgWidth = logoImage.width;
-    const imgHeight = logoImage.height;
+    const imgWidth = embeddedLogoImage.width;
+    const imgHeight = embeddedLogoImage.height;
     const scale = Math.min(maxLogoWidth / imgWidth, maxLogoHeight / imgHeight);
     const drawWidth = imgWidth * scale;
     const drawHeight = imgHeight * scale;
     const logoY = height - headerHeight + (headerHeight - drawHeight) / 2;
-    page.drawImage(logoImage, {
+    page.drawImage(embeddedLogoImage, {
       x: sideMargin,
       y: logoY,
       width: drawWidth,
@@ -120,12 +185,12 @@ export async function generateQuotePDF({
     const infoY = height - headerHeight + 21; // subido 16px respecto a antes
     const infoHeight = fontSize + 10;
     const infoWidth = width - infoX - sideMargin;
-    const textFont = await pdfDoc.embedFont(StandardFonts.Helvetica);
-    let textWidth = textFont.widthOfTextAtSize(infoText, fontSize);
+    infoTextFont = await pdfDoc.embedFont(StandardFonts.Helvetica);
+    let textWidth = infoTextFont.widthOfTextAtSize(infoText, fontSize);
     // Si el texto no cabe, reducir el fontSize hasta que quepa
     while (textWidth > infoWidth - 16 && fontSize > 9) {
       fontSize -= 1;
-      textWidth = textFont.widthOfTextAtSize(infoText, fontSize);
+      textWidth = infoTextFont.widthOfTextAtSize(infoText, fontSize);
     }
     page.drawRectangle({
       x: infoX,
@@ -141,11 +206,73 @@ export async function generateQuotePDF({
       y: textY,
       size: fontSize,
       color: rgb(1, 1, 1),
-      font: textFont,
+      font: infoTextFont,
     });
   } catch (error) {
     console.error('Error loading logo:', error);
   }
+
+  // Helper: dibuja el header en cualquier página (logo + barra roja de info)
+  const drawHeader = (p: any) => {
+    try {
+      // Background band
+      p.drawRectangle({
+        x: 0,
+        y: height - headerHeight,
+        width: width,
+        height: headerHeight,
+        color: lightGray,
+      });
+      // Draw logo if embedded
+      if (embeddedLogoImage) {
+        const maxLogoWidth = 120 * 1.5;
+        const maxLogoHeight = 36 * 1.5;
+        const imgWidth = embeddedLogoImage.width;
+        const imgHeight = embeddedLogoImage.height;
+        const scale = Math.min(maxLogoWidth / imgWidth, maxLogoHeight / imgHeight);
+        const drawWidth = imgWidth * scale;
+        const drawHeight = imgHeight * scale;
+        const logoY = height - headerHeight + (headerHeight - drawHeight) / 2;
+        p.drawImage(embeddedLogoImage, {
+          x: sideMargin,
+          y: logoY,
+          width: drawWidth,
+          height: drawHeight,
+        });
+
+        // Info red bar to the right of logo
+        const infoText = 'Web: fasercon.cl   -   Email: ventas@fasercon.cl   -   Tel.: +56 9 9868 0862';
+        let fontSize = 10;
+        const infoX = sideMargin + drawWidth + 18;
+        const infoY = height - headerHeight + 21;
+        const infoHeight = fontSize + 10;
+        const infoWidth = width - infoX - sideMargin;
+        const fontToUse = infoTextFont || fontRegular;
+        let textWidth = fontToUse.widthOfTextAtSize(infoText, fontSize);
+        while (textWidth > infoWidth - 16 && fontSize > 9) {
+          fontSize -= 1;
+          textWidth = fontToUse.widthOfTextAtSize(infoText, fontSize);
+        }
+        p.drawRectangle({ x: infoX, y: infoY, width: infoWidth, height: infoHeight, color: primaryRed });
+        const textX = infoX + Math.max(8, (infoWidth - textWidth) / 2);
+        const textY = infoY + (infoHeight - fontSize) / 2;
+        p.drawText(infoText, { x: textX, y: textY, size: fontSize, color: rgb(1, 1, 1), font: fontToUse });
+      } else {
+        // Fallback: draw only the red info bar occupying the right side
+        const infoText = 'Web: fasercon.cl   -   Email: ventas@fasercon.cl   -   Tel.: +56 9 9868 0862';
+        const infoHeight = 20;
+        const infoX = sideMargin + 120;
+        const infoY = height - headerHeight + 21;
+        const infoWidth = width - infoX - sideMargin;
+        p.drawRectangle({ x: infoX, y: infoY, width: infoWidth, height: infoHeight, color: primaryRed });
+        const textX = infoX + 12;
+        const textY = infoY + 4;
+        p.drawText(infoText, { x: textX, y: textY, size: 9, color: rgb(1, 1, 1), font: fontRegular });
+      }
+    } catch (err) {
+      console.error('drawHeader error', err);
+    }
+  };
 
   // Título centrado fuera del header: más grande, peso normal y gris más claro
   const marginTop = 40; // aumentar espacio vertical entre el bottom del header y el título
@@ -474,7 +601,37 @@ export async function generateQuotePDF({
   const fieldTextYOffset = 6; // subir ligeramente los textos dentro de las cajas
   const leftTextY = leftBoxTopY - fieldBoxPaddingV - (labelSize / 2) + (valueSize / 2) - fieldTextYOffset;
   page.drawText('Tiempo de ejecución / entrega:', { x: colLeftX + fieldBoxPaddingH, y: leftTextY, size: labelSize, font: fontBold, color: textColor });
-  page.drawText(String(execution_time ?? '-'), { x: colLeftX + fieldBoxPaddingH + fontBold.widthOfTextAtSize('Tiempo de ejecución / entrega:', labelSize) + 6, y: leftTextY, size: valueSize, font: fontRegular, color: textColor });
+  // Mostrar duración (días / semanas / meses) en lugar de las fechas crudas
+  const renderExecutionDuration = (() => {
+    try {
+      if (!execution_time || execution_time === '') return '-';
+      // Si viene en formato 'YYYY-MM-DD|YYYY-MM-DD'
+      if (String(execution_time).includes('|')) {
+        const parts = String(execution_time).split('|');
+        const s = parts[0];
+        const e = parts[1];
+        const start = new Date(s);
+        const end = new Date(e);
+        if (!isNaN(start.getTime()) && !isNaN(end.getTime()) && end >= start) {
+          const diffMs = end.getTime() - start.getTime();
+          const days = Math.max(1, Math.floor(diffMs / (1000 * 60 * 60 * 24)));
+          const weeks = Math.floor(days / 7);
+          const months = Math.floor(days / 30);
+          if (months >= 1) return `${months} ${months === 1 ? 'mes' : 'meses'}`;
+          if (weeks >= 1) return `${weeks} ${weeks === 1 ? 'semana' : 'semanas'}`;
+          return `${days} ${days === 1 ? 'día' : 'días'}`;
+        }
+      }
+      // Fallback: si viene como texto libre intentar extraer un número y unidad
+      const txt = String(execution_time).trim();
+      const match = txt.match(/(\d+)\s*(d[ií]as?|dias?|semanas?|semanas|meses?|mes)/i);
+      if (match) return `${match[1]} ${match[2]}`;
+      return txt || '-';
+    } catch {
+      return '-';
+    }
+  })();
+  page.drawText(renderExecutionDuration, { x: colLeftX + fieldBoxPaddingH + fontBold.widthOfTextAtSize('Tiempo de ejecución / entrega:', labelSize) + 6, y: leftTextY, size: valueSize, font: fontRegular, color: textColor });
 
   // Right box (Forma de pago)
   const rightBoxTopY = y + fieldBoxPaddingV + Math.max(labelSize, valueSize) / 2;
@@ -571,6 +728,23 @@ export async function generateQuotePDF({
   // Totales acumulados
   let totalPriceNoDiscount = 0; // suma de priceTotal antes de aplicar descuentos
   let totalNet = 0; // suma de subtotales (con descuento aplicado)
+  
+  // Pagination control
+  let currentPage = page;
+  // page number tracking not needed currently
+  // Footer and disclaimer size estimates
+  const footerHeight = 30;
+  const estimatedDisclaimerHeight = 56;
+  // For intermediate pages we only need to reserve space for the footer (allow more rows per page)
+  const minYBeforeNewPageForItems = footerHeight + 8; // small padding above footer
+  
+  // Track table position on current page (for border drawing at the end)
+  let currentPageTableStartY = productTableStartY;
+  let tableHasContentOnCurrentPage = false;
+  
+  // Dibujar footer en la página inicial
+  drawFooter(currentPage);
+  
   items.forEach((item, idx) => {
     const name = item.name || '';
     const characteristics = (item.characteristics || []).join(', ');
@@ -639,13 +813,74 @@ export async function generateQuotePDF({
     totalPriceNoDiscount += priceTotal;
     totalNet += subtotal;
     
+    // Check if we need a new page before drawing this item (only reserve footer area on intermediate pages)
+    const willExceedPage = (productY - baseRowHeight) < minYBeforeNewPageForItems;
+    if (willExceedPage) {
+      console.log(`[PDF Pagination] Creating new page before item ${idx} (productY=${productY}, baseRowHeight=${baseRowHeight})`);
+      
+      // Close current page's table border using tracked position
+      if (tableHasContentOnCurrentPage) {
+        const currentTableHeight = currentPageTableStartY - productY;
+        currentPage.drawRectangle({
+          x: sideMargin,
+          y: currentPageTableStartY - currentTableHeight,
+          width: width - sideMargin * 2,
+          height: currentTableHeight,
+          borderColor: primaryRed,
+          borderWidth: borderThickness,
+          color: undefined,
+        });
+      }
+      
+      // Create new page
+      currentPage = pdfDoc.addPage([595, 842]);
+
+      // Draw header for the new page and reserve space below it
+      drawHeader(currentPage);
+      // Reset productY to top of new page (below header area)
+      const newPageMarginTop = headerHeight + 18;
+      productY = height - newPageMarginTop;
+
+      // Update table position tracking for new page
+      currentPageTableStartY = productY;
+
+      // Redraw column headers on new page
+      const newColumnHeaderY = productY - columnHeaderHeight;
+      currentPage.drawRectangle({
+        x: sideMargin,
+        y: newColumnHeaderY,
+        width: width - sideMargin * 2,
+        height: columnHeaderHeight,
+        color: primaryRed,
+      });
+
+      columnHeaders.forEach((header, index) => {
+        const headerWidth = fontBold.widthOfTextAtSize(header, columnHeaderStyle.size);
+        const xPos = columnPositions[index] + (columnWidths[index] - headerWidth) / 2;
+        currentPage.drawText(header, {
+          x: xPos,
+          y: newColumnHeaderY + 6,
+          ...columnHeaderStyle,
+        });
+      });
+
+      // Dibujar footer en la nueva página
+      drawFooter(currentPage);
+      
+      productY = productY - columnHeaderHeight;
+      tableHasContentOnCurrentPage = false; // reset for new page
+    }
+    
     // Debug: log SKU value
     console.log(`[PDF] Item ${idx}: name="${item.name}", sku="${item.sku || '(empty)'}", productY=${productY}, baseRowHeight=${baseRowHeight}`);
+    
+    // Mark that current page has content
+    tableHasContentOnCurrentPage = true;
     
     // Alternar fondo gris en las filas de productos (más visible que el lightGray anterior)
     const altRowGray = rgb(0.97, 0.97, 0.97);
     const backgroundColor = idx % 2 === 0 ? rgb(1, 1, 1) : altRowGray;
-    page.drawRectangle({
+    currentPage.drawRectangle({
       x: sideMargin,
       y: productY - baseRowHeight,
       width: width - sideMargin * 2,
@@ -687,7 +922,7 @@ export async function generateQuotePDF({
     
     console.log(`[PDF] Drawing SKU "${skuText}" at x=${skuX}, y=${skuY}, columnStart=${skuColumnStart}, columnWidth=${skuColumnWidth}`);
     
-    page.drawText(skuText, {
+    currentPage.drawText(skuText, {
       x: skuX,
       y: skuY,
       size: 8,
@@ -703,7 +938,7 @@ export async function generateQuotePDF({
     let charY = Math.round(firstBaselineY);
     // Draw wrapped name lines
     for (const nameLine of nameLines) {
-      page.drawText(nameLine, {
+      currentPage.drawText(nameLine, {
         x: columnPositions[1] + 20,
         y: charY,
         size: fontSizeForCells,
@@ -716,7 +951,7 @@ export async function generateQuotePDF({
       charY -= spacerHeight;
     }
     for (const charLine of charLines) {
-      page.drawText(charLine, {
+      currentPage.drawText(charLine, {
         x: columnPositions[1] + 20,
         y: charY,
         size: fontSizeForCells,
@@ -726,12 +961,17 @@ export async function generateQuotePDF({
       charY -= lineHeightPx;
     }
     // Unidad (now after Cantidad)
-    if (item.measurement_unit) {
-      const symbol = unitSymbols[item.measurement_unit] ?? item.measurement_unit;
-      const unitText = symbol || '';
-      const unitTextWidth = fontRegular.widthOfTextAtSize(unitText, 8);
+    // Prefer different possible fields that may carry the unit coming from the frontend/API
+    const measurementUnit = item.measurement_unit ?? (item as any).unit_measure ?? (item as any).unit ?? (item as any).measurementUnit ?? null;
+    // Only display the measurement unit (mapped via unitSymbols) — do NOT concatenate unit_size
+    let unitDisplay = '';
+    if (measurementUnit) {
+      unitDisplay = unitSymbols[measurementUnit] ?? String(measurementUnit);
+    }
+    if (unitDisplay) {
+      const unitTextWidth = fontRegular.widthOfTextAtSize(unitDisplay, 8);
       const unitColumnWidth = columnWidths[3];
-      page.drawText(unitText, {
+      currentPage.drawText(unitDisplay, {
         x: columnPositions[3] + (unitColumnWidth - unitTextWidth) / 2,
         y: productY - baseRowHeight / 2,
         size: 8,
@@ -743,7 +983,7 @@ export async function generateQuotePDF({
     const qtyText = `${item.qty}`;
     const qtyTextWidth = fontRegular.widthOfTextAtSize(qtyText, 8);
     const qtyColumnWidth = columnWidths[2];
-    page.drawText(qtyText, {
+    currentPage.drawText(qtyText, {
       x: columnPositions[2] + (qtyColumnWidth - qtyTextWidth) / 2,
       y: productY - baseRowHeight / 2,
       size: 8,
@@ -755,7 +995,7 @@ export async function generateQuotePDF({
     const unitTextWidth = fontRegular.widthOfTextAtSize(unitText, 8);
     const unitColumnWidth = columnWidths[4];
     const unitColumnEnd = columnPositions[4] + unitColumnWidth;
-    page.drawText(unitText, {
+    currentPage.drawText(unitText, {
       x: unitColumnEnd - unitTextWidth - 6, // Alineado a la derecha con pequeño padding
       y: productY - baseRowHeight / 2,
       size: 8,
@@ -767,7 +1007,7 @@ export async function generateQuotePDF({
     const priceTextWidth = fontRegular.widthOfTextAtSize(priceText, 8);
     const priceColumnWidth = columnWidths[5];
     const priceColumnEnd = columnPositions[5] + priceColumnWidth;
-    page.drawText(priceText, {
+    currentPage.drawText(priceText, {
       x: priceColumnEnd - priceTextWidth - 6, // Alineado a la derecha con pequeño padding
       y: productY - baseRowHeight / 2,
       size: 8,
@@ -778,7 +1018,7 @@ export async function generateQuotePDF({
     const discountText = discountPercent ? `${discountPercent}%` : '-';
     const discountTextWidth = fontRegular.widthOfTextAtSize(discountText, 8);
     const discountColumnWidth = columnWidths[6];
-    page.drawText(discountText, {
+    currentPage.drawText(discountText, {
       x: columnPositions[6] + (discountColumnWidth - discountTextWidth) / 2,
       y: productY - baseRowHeight / 2,
       size: 8,
@@ -790,7 +1030,7 @@ export async function generateQuotePDF({
     const subtotalTextWidth = fontRegular.widthOfTextAtSize(subtotalText, 8);
     const subtotalColumnWidth = columnWidths[7];
     const subtotalColumnEnd = columnPositions[7] + subtotalColumnWidth;
-    page.drawText(subtotalText, {
+    currentPage.drawText(subtotalText, {
       x: subtotalColumnEnd - subtotalTextWidth - 6, // Alineado a la derecha con pequeño padding
       y: productY - baseRowHeight / 2,
       size: 8,
@@ -801,10 +1041,11 @@ export async function generateQuotePDF({
   });
 
   // Ajustar el borde dinámico para que no haya espacio entre el último producto y el borde inferior
-  const adjustedTableHeight = productTableStartY - productY;
-  page.drawRectangle({
+  // Use the current page's table position, not the original first page position
+  const adjustedTableHeight = currentPageTableStartY - productY;
+  currentPage.drawRectangle({
     x: sideMargin,
-    y: productTableStartY - adjustedTableHeight,
+    y: currentPageTableStartY - adjustedTableHeight,
     width: width - sideMargin * 2,
     height: adjustedTableHeight,
     borderColor: primaryRed,
@@ -817,9 +1058,25 @@ export async function generateQuotePDF({
   const totalsBoxPadding = 10;
   const totalsBoxHeight = 90;
   const totalsBoxX = width - sideMargin - totalsBoxWidth; // right aligned
-  // position the totals box below the table with a small gap
-  const totalsBoxGap = 12;
-  const totalsBoxY = productTableStartY - adjustedTableHeight - totalsBoxHeight - totalsBoxGap;
+  // position the totals box below the table with moderate spacing
+  const totalsBoxGap = 8;
+  let totalsBoxY = currentPageTableStartY - adjustedTableHeight - totalsBoxHeight - totalsBoxGap;
+  
+  // Check if totals box would go too low (overlap with footer + disclaimer)
+  // If so, create a new page for totals and disclaimer
+  if (totalsBoxY < (footerHeight + estimatedDisclaimerHeight + 12)) {
+    console.log(`[PDF Pagination] Moving totals and disclaimer to new page (totalsBoxY=${totalsBoxY})`);
+    
+    // Create new page for totals
+    currentPage = pdfDoc.addPage([595, 842]);
+    
+    // Position totals at top of new page: reserve full header + title area to avoid overlap
+    // Draw header and footer on the new totals page as well
+    drawHeader(currentPage);
+    drawFooter(currentPage);
+    const newPageMarginTop = headerHeight + marginTop + 8; // reserve header + title spacing
+    totalsBoxY = height - newPageMarginTop - totalsBoxHeight;
+  }
   // Calcular valores
   const totalNoDiscountRounded = Math.round(totalPriceNoDiscount || 0);
   const totalNetRounded = Math.round(totalNet || 0);
@@ -827,7 +1084,7 @@ export async function generateQuotePDF({
   const totalWithIva = totalNetRounded + iva;
 
   // Dibujar bloque de totales: fondo blanco con borde rojo (sin fondo rojo sólido)
-  page.drawRectangle({
+  currentPage.drawRectangle({
     x: totalsBoxX,
     y: totalsBoxY,
     width: totalsBoxWidth,
@@ -867,7 +1124,7 @@ export async function generateQuotePDF({
       const bgYOffset = -1; // negativo mueve el fondo hacia abajo unos px
       const rectY = currentRowY - rectHeight / 2 - textBaselineOffset + bgYOffset;
       // Dibujar fondo gris intercalado extendido de borde a borde
-      page.drawRectangle({
+      currentPage.drawRectangle({
         x: totalsBoxX,
         y: rectY,
         width: totalsBoxWidth,
@@ -877,7 +1134,7 @@ export async function generateQuotePDF({
     }
   }
   // Volver a dibujar el borde rojo del recuadro de totales encima de los fondos
-  page.drawRectangle({
+  currentPage.drawRectangle({
     x: totalsBoxX,
     y: totalsBoxY,
     width: totalsBoxWidth,
@@ -890,93 +1147,34 @@ export async function generateQuotePDF({
   const textYOffset = -7; // desplazar texto un poco más hacia abajo
   let rowY = firstRowY;
 
-  page.drawText('Total Neto Sin Descuento:', { x: labelX, y: rowY + textYOffset, size: totalsLabelSize, font: fontBold, color: totalsTextColor });
+  currentPage.drawText('Total Neto Sin Descuento:', { x: labelX, y: rowY + textYOffset, size: totalsLabelSize, font: fontBold, color: totalsTextColor });
   const v1 = `$ ${formatCLP(totalNoDiscountRounded)}`;
   const v1w = fontBold.widthOfTextAtSize(v1, totalsValueSize);
-  page.drawText(v1, { x: valueX - v1w, y: rowY + textYOffset, size: totalsValueSize, font: fontBold, color: totalsTextColor });
+  currentPage.drawText(v1, { x: valueX - v1w, y: rowY + textYOffset, size: totalsValueSize, font: fontBold, color: totalsTextColor });
   rowY -= 18;
 
-  page.drawText('Total Neto:', { x: labelX, y: rowY + textYOffset, size: totalsLabelSize, font: fontBold, color: totalsTextColor });
+  currentPage.drawText('Total Neto:', { x: labelX, y: rowY + textYOffset, size: totalsLabelSize, font: fontBold, color: totalsTextColor });
   const v2 = `$ ${formatCLP(totalNetRounded)}`;
   const v2w = fontBold.widthOfTextAtSize(v2, totalsValueSize);
-  page.drawText(v2, { x: valueX - v2w, y: rowY + textYOffset, size: totalsValueSize, font: fontBold, color: totalsTextColor });
+  currentPage.drawText(v2, { x: valueX - v2w, y: rowY + textYOffset, size: totalsValueSize, font: fontBold, color: totalsTextColor });
   rowY -= 18;
 
-  page.drawText('IVA (19%):', { x: labelX, y: rowY + textYOffset, size: totalsLabelSize, font: fontBold, color: totalsTextColor });
+  currentPage.drawText('IVA (19%):', { x: labelX, y: rowY + textYOffset, size: totalsLabelSize, font: fontBold, color: totalsTextColor });
   const v3 = `$ ${formatCLP(iva)}`;
   const v3w = fontBold.widthOfTextAtSize(v3, totalsValueSize);
-  page.drawText(v3, { x: valueX - v3w, y: rowY + textYOffset, size: totalsValueSize, font: fontBold, color: totalsTextColor });
+  currentPage.drawText(v3, { x: valueX - v3w, y: rowY + textYOffset, size: totalsValueSize, font: fontBold, color: totalsTextColor });
   rowY -= 18;
 
-  page.drawText('TOTAL:', { x: labelX, y: rowY + textYOffset, size: totalsLabelSize, font: fontBold, color: totalsTextColor });
+  currentPage.drawText('TOTAL:', { x: labelX, y: rowY + textYOffset, size: totalsLabelSize, font: fontBold, color: totalsTextColor });
   const v4 = `$ ${formatCLP(totalWithIva)}`;
   const v4w = fontBold.widthOfTextAtSize(v4, totalsValueSize);
   // Resaltar el TOTAL en rojo para mayor énfasis, manteniendo el resto en gris oscuro
-  page.drawText(v4, { x: valueX - v4w, y: rowY + textYOffset, size: totalsValueSize, font: fontBold, color: primaryRed });
+  currentPage.drawText(v4, { x: valueX - v4w, y: rowY + textYOffset, size: totalsValueSize, font: fontBold, color: primaryRed });
 
   // Asegurar que los títulos sean visibles dibujándolos después del borde
   // (Removed obsolete productosTitle reference - description is drawn above if present)
 
-  // ============= FOOTER =============
-  // Reduce the height of the footer and decrease the text size
-  page.drawRectangle({
-    x: 0,
-    y: 0,
-    width: width,
-    height: 30, // Reduced from 50 to 40
-    color: primaryRed,
-  });
-  
-  const footerText = 'Web: fasercon.cl   -   Tel: +56 9 9868 0862   -   Email: ventas@fasercon.cl';
-  const footerTextSize = 9; // Incrementar tamaño de texto
-  const footerTextWidth = fontRegular.widthOfTextAtSize(footerText, footerTextSize);
-  page.drawText(footerText, {
-    x: (width - footerTextWidth) / 2, // Centrar horizontalmente
-    y: 15, // Ajustar para que encaje dentro del footer
-    size: footerTextSize, // Usar tamaño más grande
-    font: fontRegular,
-    color: rgb(1, 1, 1),
-  });
-
-  // Add a clickable link to 'fasercon.cl' in the footer
-  const footerLinkText = 'Web: fasercon.cl';
-  const footerLinkWidth = fontRegular.widthOfTextAtSize(footerLinkText, 8);
-  const linkX = (width - footerTextWidth) / 2 + footerText.indexOf('fasercon.cl') * 4.5; // Approximate position of 'fasercon.cl'
-  const linkY = 15;
-  const linkRect = [
-    linkX - 2, // Add padding around the text
-    linkY - 2,
-    linkX + footerLinkWidth + 2,
-    linkY + 8,
-  ];
-  const linkAction = pdfDoc.context.obj({
-    Type: PDFName.of('Action'),
-    S: PDFName.of('URI'),
-    URI: 'https://fasercon.cl',
-  });
-  const linkAnnot = pdfDoc.context.obj({
-    Type: PDFName.of('Annot'),
-    Subtype: PDFName.of('Link'),
-    Rect: pdfDoc.context.obj(linkRect),
-    Border: pdfDoc.context.obj([0, 0, 0]),
-    A: linkAction,
-  });
-  const linkRef = pdfDoc.context.register(linkAnnot);
-  (page.node as any).normalize();
-  const annotsKey = PDFName.of('Annots');
-  let annots = page.node.lookup(annotsKey);
-  if (!annots) {
-    annots = pdfDoc.context.obj([]);
-    page.node.set(annotsKey, annots);
-  }
-  // Fix the annotation addition logic for the footer link
-  if (Array.isArray(annots)) {
-    annots.push(linkRef);
-  } else if (typeof annots === 'object' && 'push' in annots) {
-    (annots as any).push(linkRef);
-  } else {
-    console.error('Could not add annotation to the page: Annots is not an array.');
-  }
+  // Footer: rendered on each page via drawFooter()
 
   // ============= DISCLAIMER =============
   const disclaimerText = 'Esta cotización constituye una propuesta comercial basada en la información disponible a la fecha. Los precios, condiciones y plazos indicados son válidos por 5 días y pueden estar sujetos a cambios sin previo aviso. La aceptación de esta cotización debe formalizarse por escrito para su posterior ejecución.';
@@ -985,7 +1183,7 @@ export async function generateQuotePDF({
   const disclaimerY = 36; // acercar un poco al footer
 
   // Dibujar el borde gris
-  page.drawRectangle({
+  currentPage.drawRectangle({
     x: sideMargin,
     y: disclaimerY,
     width: width - sideMargin * 2,
@@ -999,7 +1197,7 @@ export async function generateQuotePDF({
   const disclaimerPadding = 8; // reducir padding interno para ganar espacio
   const disclaimerTextX = sideMargin + disclaimerPadding; // Margen interno izquierdo con padding
   const disclaimerTextY = disclaimerY + disclaimerHeight - disclaimerPadding; // Ajustar para que el texto no desborde hacia abajo
-  page.drawText(disclaimerText, {
+  currentPage.drawText(disclaimerText, {
     x: disclaimerTextX,
     y: disclaimerTextY - disclaimerTextSize, // Ajustar posición vertical del texto
     size: disclaimerTextSize,
@@ -1018,6 +1216,9 @@ const unitSymbols: Record<string, string> = {
   in: '"',
   ft: "'",
   m: 'm',
+  m2: 'm²',
+  m3: 'm³',
+  m_lin: 'm (lineal)',
   cm: 'cm',
   mm: 'mm',
   kg: 'kg',

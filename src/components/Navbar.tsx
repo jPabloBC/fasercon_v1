@@ -2,6 +2,7 @@
 import React, { useEffect, useState } from 'react'
 import Link from 'next/link'
 import Image from 'next/image'
+// use native <img> for responsive Tailwind sizing on small screens
 import { usePathname } from 'next/navigation'
 import { useRouter } from 'next/navigation'
 import { Bars3Icon, XMarkIcon } from '@heroicons/react/24/outline'
@@ -80,21 +81,52 @@ export default function Navbar() {
 
   return (
     <header className="bg-white shadow-lg fixed w-full top-0 z-50 border-b border-gray-200">
-      <nav className="mx-auto flex max-w-7xl items-center justify-between py-4 px-6 lg:px-8" aria-label="Global">
+      <nav className="mx-auto flex max-w-7xl items-center justify-between py-4 px-6 lg:px-8 mt-2" aria-label="Global">
         <div className="flex lg:flex-1">
           <Link href="/" className="-m-1.5 p-1.5">
             <span className="sr-only">Fasercom</span>
-            <div className="flex items-center space-x-3">
-              <Image
-                src="/assets/images/fasercon_logo2.png"
-                alt="Fasercom Logo"
-                width={180}
-                height={60}
-                className="h-10 w-auto sm:h-12 md:h-16 lg:h-18 xl:h-18"
-                style={{ width: 'auto', height: 'auto', aspectRatio: 'auto' }}
-                priority
-              />
+            <div className="flex items-center space-x-3 h-auto">
+              <div className="relative logo-container">
+                <Image
+                  src="/assets/images/fasercon_logo2.png"
+                  alt="Fasercom Logo"
+                  fill
+                  className="object-contain"
+                  priority
+                />
+              </div>
             </div>
+            <style jsx>{`
+              /* Base size (design baseline) - increased 20% */
+              .logo-container {
+                --base-logo-h: clamp(2.1rem, 6vw, 3.3rem);
+                /* small screens: base * 1.2 => +20% */
+                height: calc(var(--base-logo-h) * 1.2);
+                width: calc(var(--base-logo-h) * 1.2 * 3); /* preserve ~3:1 aspect */
+              }
+
+              /* medium and larger: base * 1.1 => +10% */
+              @media (min-width: 768px) {
+                .logo-container {
+                  height: calc(var(--base-logo-h) * 1.1);
+                  width: calc(var(--base-logo-h) * 1.1 * 3);
+                }
+              }
+
+              @media (min-width: 1024px) {
+                .logo-container {
+                  height: calc(var(--base-logo-h) * 1.1);
+                  width: calc(var(--base-logo-h) * 1.1 * 3);
+                }
+              }
+
+              /* Force visual scaling on the actual image element produced by next/image */
+              .logo-container :global(img) {
+                transition: transform .12s ease;
+                transform-origin: left center;
+                transform: scale(1.2); /* global: +20% */
+              }
+            `}</style>
           </Link>
         </div>
         <div className="flex lg:hidden">
@@ -186,7 +218,7 @@ export default function Navbar() {
                 </div>
                 <div className="py-6">
                   <Link
-                    href="/products"
+                    href="/quote"
                     className="relative block rounded-md bg-red-600 px-3.5 py-2.5 text-center text-sm font-semibold text-white shadow-sm hover:bg-red-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-600"
                     onClick={() => setMobileMenuOpen(false)}
                   >

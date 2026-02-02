@@ -4,9 +4,18 @@ import { supabaseAdmin } from '@/lib/supabase'
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url)
+    const company = searchParams.get('company') || 'fasercon'
+
+    // Validar empresa
+    if (!['fasercon', 'rym', 'vimal'].includes(company)) {
+      return NextResponse.json({ error: 'Empresa inválida' }, { status: 400 })
+    }
+
+    const TABLE_SERVICES = `${company}_quote_services`
+
     const q = searchParams.get('q')
 
-    let query = supabaseAdmin.from('fasercon_quote_services').select('*')
+    let query = supabaseAdmin.from(TABLE_SERVICES).select('*')
 
     if (q) {
       const ilikeQ = `%${q}%`
@@ -15,7 +24,7 @@ export async function GET(request: NextRequest) {
       
       // Query 1: Search text fields
       const { data: textResults, error: textError } = await supabaseAdmin
-        .from('fasercon_quote_services')
+        .from(TABLE_SERVICES)
         .select('*')
         .or(orExpr)
         .limit(500);
@@ -30,7 +39,7 @@ export async function GET(request: NextRequest) {
       const looksLikeUuidPart = /^[0-9a-f-]+$/i.test(q.trim());
       if (looksLikeUuidPart) {
         const { data: allServices } = await supabaseAdmin
-          .from('fasercon_quote_services')
+          .from(TABLE_SERVICES)
           .select('*')
           .limit(2000);
         
@@ -53,7 +62,7 @@ export async function GET(request: NextRequest) {
 
       query = { data: uniqueResults, error: null } as any;
     } else {
-      const result = await supabaseAdmin.from('fasercon_quote_services').select('*');
+      const result = await supabaseAdmin.from(TABLE_SERVICES).select('*');
       query = result as any;
     }
 

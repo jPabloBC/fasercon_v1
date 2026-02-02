@@ -1,8 +1,6 @@
 import { NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 
-const TABLE = 'fasercon_clients'
-
 /**
  * GET /api/clients
  * - If query param `q` is provided, performs a multi-field ilike search and returns up to 50 rows.
@@ -11,6 +9,15 @@ const TABLE = 'fasercon_clients'
 export async function GET(req: Request) {
   try {
     const url = new URL(req.url)
+    const company = url.searchParams.get('company') || 'fasercon'
+
+    // Validar empresa
+    if (!['fasercon', 'rym', 'vimal'].includes(company)) {
+      return NextResponse.json({ error: 'Empresa inválida' }, { status: 400 })
+    }
+
+    const TABLE = `${company}_clients`
+
     const q = (url.searchParams.get('q') || '').trim()
     const name = (url.searchParams.get('name') || '').trim()
 
@@ -62,6 +69,16 @@ export async function GET(req: Request) {
 
 export async function POST(req: Request) {
   try {
+    const url = new URL(req.url)
+    const companyParam = url.searchParams.get('company') || 'fasercon'
+
+    // Validar empresa
+    if (!['fasercon', 'rym', 'vimal'].includes(companyParam)) {
+      return NextResponse.json({ error: 'Empresa inválida' }, { status: 400 })
+    }
+
+    const TABLE = `${companyParam}_clients`
+
     const body = await req.json()
     const client = {
       company: body.company || body.name || '',
@@ -112,6 +129,16 @@ export async function POST(req: Request) {
 
 export async function PATCH(req: Request) {
   try {
+    const url = new URL(req.url)
+    const companyParam = url.searchParams.get('company') || 'fasercon'
+
+    // Validar empresa
+    if (!['fasercon', 'rym', 'vimal'].includes(companyParam)) {
+      return NextResponse.json({ error: 'Empresa inválida' }, { status: 400 })
+    }
+
+    const TABLE = `${companyParam}_clients`
+
     const body = await req.json()
     const id = body.id || body?.id?.toString()
     if (!id) return NextResponse.json({ error: 'Missing id' }, { status: 400 })
@@ -128,6 +155,16 @@ export async function PATCH(req: Request) {
 
 export async function DELETE(req: Request) {
   try {
+    const url = new URL(req.url)
+    const companyParam = url.searchParams.get('company') || 'fasercon'
+
+    // Validar empresa
+    if (!['fasercon', 'rym', 'vimal'].includes(companyParam)) {
+      return NextResponse.json({ error: 'Empresa inválida' }, { status: 400 })
+    }
+
+    const TABLE = `${companyParam}_clients`
+
     const body = await req.json()
     const id = body.id || body?.id?.toString()
     if (!id) return NextResponse.json({ error: 'Missing id' }, { status: 400 })

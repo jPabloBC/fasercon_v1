@@ -253,9 +253,9 @@ export default function QuotePage() {
   return (
     <main className="min-h-screen bg-gray-50">
       <Navbar />
-      <div className="pt-36 pb-8 flex flex-col items-center w-full">
+      <div className="pt-36 pb-2 flex flex-col items-center w-full">
         {/* Banner de productos destacados tipo carrusel horizontal, más pequeño y sin afectar la selección */}
-  <div className="relative bg-white rounded-xl shadow p-2 mb-6 overflow-x-auto w-[90vw] mx-auto">
+  <div className="relative bg-white rounded-xl shadow p-2 mb-2 overflow-x-auto w-[90vw] mx-auto">
           <button onClick={prev} className="absolute left-1 top-1/2 -translate-y-1/2 p-1 bg-gray-100 rounded-full hover:bg-gray-200 z-10">
             <ArrowLeftIcon className="h-4 w-4 text-gray-600" />
           </button>
@@ -402,7 +402,7 @@ export default function QuotePage() {
 
         {/* Lista de productos añadidos */}
         {list.length > 0 && (
-          <div className="w-full max-w-6xl mt-10 bg-white rounded-xl shadow p-8">
+          <div className="w-full max-w-6xl bg-white rounded-xl shadow p-8">
             <h3 className="text-2xl font-bold mb-6 text-gray-900">Lista de productos</h3>
             {/* Wrapping 'Contacto para la cotización' in a gray margin */}
             <div className="bg-gray-100 p-6 rounded-lg border-3 border-gray-300 mb-6">
