@@ -1,7 +1,25 @@
-export async function GET() {
+import { NextRequest, NextResponse } from 'next/server'
+import { z } from 'zod'
+import { supabaseAdmin } from '@/lib/supabase'
+
+export async function GET(request: NextRequest) {
   try {
+    // Detectar empresa desde query param
+    const url = new URL(request.url)
+    const companyParam = url.searchParams.get('company') || 'fasercon'
+
+    // Validar empresa
+    if (!['fasercon', 'rym', 'vimal'].includes(companyParam)) {
+      return NextResponse.json(
+        { error: 'Empresa inválida' },
+        { status: 400 }
+      )
+    }
+
+    const contactsTable = `${companyParam}_contact_forms`
+
     const { data: contacts, error } = await supabaseAdmin
-      .from('fasercon_contact_forms')
+      .from(contactsTable)
       .select('*')
       .order('created_at', { ascending: false })
 
@@ -10,7 +28,7 @@ export async function GET() {
       return NextResponse.json({ error: 'Error al obtener los contactos' }, { status: 500 })
     }
 
-    // Transformar snake_case a camelCase si es necesario
+    // Transformar snake_case a camelCase
     const transformedContacts = (contacts || []).map(contact => ({
       id: contact.id,
       name: contact.name,
@@ -27,9 +45,6 @@ export async function GET() {
     return NextResponse.json({ error: 'Error interno del servidor' }, { status: 500 })
   }
 }
-import { NextRequest, NextResponse } from 'next/server'
-import { z } from 'zod'
-import { supabaseAdmin } from '@/lib/supabase'
 
 const contactSchema = z.object({
   name: z.string().min(2, 'El nombre debe tener al menos 2 caracteres'),
@@ -48,13 +63,27 @@ const contactSchema = z.object({
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
-    
+
+    // Detectar empresa desde query param o body
+    const url = new URL(request.url)
+    const companyParam = body.company || url.searchParams.get('company') || 'fasercon'
+
+    // Validar empresa
+    if (!['fasercon', 'rym', 'vimal'].includes(companyParam)) {
+      return NextResponse.json(
+        { error: 'Empresa inválida' },
+        { status: 400 }
+      )
+    }
+
+    const contactsTable = `${companyParam}_contact_forms`
+
     // Validar los datos
     const validatedData = contactSchema.parse(body)
-    
+
     // Guardar en la base de datos
     const { data: contactForm, error } = await supabaseAdmin
-      .from('fasercon_contact_forms')
+      .from(contactsTable)
       .insert([
         {
           name: validatedData.name,
